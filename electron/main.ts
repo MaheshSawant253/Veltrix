@@ -2,6 +2,11 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { initDatabase, handleDbQuery, handleDbRun } from './handlers/db.handler'
 import { handleDetectEncoder, handleGetVersion } from './handlers/ffmpeg.handler'
+import {
+  handleOpenMediaDialog,
+  handleGetMediaDuration,
+  handleFileExists
+} from './handlers/file.handler'
 
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
@@ -13,7 +18,8 @@ const createWindow = (): void => {
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      webSecurity: false
     }
   })
 
@@ -40,6 +46,15 @@ const registerIpcHandlers = (): void => {
   // FFmpeg handlers
   ipcMain.handle('ffmpeg:detectEncoder', () => handleDetectEncoder())
   ipcMain.handle('ffmpeg:getVersion', () => handleGetVersion())
+
+  // File handlers
+  ipcMain.handle('file:openMediaDialog', () => handleOpenMediaDialog())
+  ipcMain.handle('file:getMediaDuration', (_event, path: string) =>
+    handleGetMediaDuration(path)
+  )
+  ipcMain.handle('file:exists', (_event, path: string) =>
+    handleFileExists(path)
+  )
 
   // App handlers
   ipcMain.handle('app:getVersion', () => app.getVersion())

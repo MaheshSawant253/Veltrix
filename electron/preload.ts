@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+interface MediaFileInfo {
+  filePath: string
+  fileName: string
+  fileType: 'video' | 'audio' | 'image'
+  fileSize: number
+  extension: string
+}
+
 const veltrixApi = {
   db: {
     query: (sql: string, params?: unknown[]): Promise<unknown[]> =>
@@ -12,6 +20,14 @@ const veltrixApi = {
       ipcRenderer.invoke('ffmpeg:detectEncoder'),
     getVersion: (): Promise<string> =>
       ipcRenderer.invoke('ffmpeg:getVersion')
+  },
+  file: {
+    openMediaDialog: (): Promise<MediaFileInfo[]> =>
+      ipcRenderer.invoke('file:openMediaDialog'),
+    getMediaDuration: (filePath: string): Promise<number> =>
+      ipcRenderer.invoke('file:getMediaDuration', filePath),
+    fileExists: (filePath: string): Promise<boolean> =>
+      ipcRenderer.invoke('file:exists', filePath)
   },
   app: {
     getVersion: (): Promise<string> =>

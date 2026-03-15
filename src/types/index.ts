@@ -147,6 +147,16 @@ export interface TimelineData {
   totalDuration: number
   playheadPosition: number
 }
+export interface MediaAsset {
+  id: string
+  filePath: string
+  fileName: string
+  fileType: 'video' | 'audio' | 'image'
+  fileSize: number
+  duration: number
+  extension: string
+  addedAt: string
+}
 
 export interface VideoProject {
   id: string
@@ -159,6 +169,7 @@ export interface VideoProject {
   status: 'draft' | 'in_progress' | 'ready' | 'exported'
   settings: VideoSettings
   timeline: TimelineData
+  assets: MediaAsset[]
   scriptIdea?: string
   createdAt: string
   updatedAt: string

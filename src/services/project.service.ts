@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { VideoProject, NewVideoFormData, TimelineData, VideoSettings } from '../types'
+import type { VideoProject, NewVideoFormData, TimelineData, VideoSettings, MediaAsset } from '../types'
 
 function createEmptyTimeline(): TimelineData {
   return {
@@ -71,6 +71,10 @@ function parseProject(row: ProjectRow): VideoProject {
     duration: (settingsRaw.duration as number) || 0
   }
 
+  const assets: MediaAsset[] = Array.isArray(settingsRaw.assets)
+    ? (settingsRaw.assets as MediaAsset[])
+    : []
+
   return {
     id: row.id,
     channelId: row.channel_id || undefined,
@@ -82,6 +86,7 @@ function parseProject(row: ProjectRow): VideoProject {
     status: (row.status as VideoProject['status']) || 'draft',
     settings,
     timeline,
+    assets,
     scriptIdea: (settingsRaw.scriptIdea as string) || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -120,7 +125,8 @@ export const projectService = {
       niche: formData.niche,
       style: formData.style,
       targetAudience: formData.targetAudience,
-      scriptIdea: formData.scriptIdea || ''
+      scriptIdea: formData.scriptIdea || '',
+      assets: []
     })
 
     await window.veltrix.db.run(
@@ -150,6 +156,31 @@ export const projectService = {
     await window.veltrix.db.run(
       "UPDATE projects SET timeline_data = ?, updated_at = datetime('now') WHERE id = ?",
       [JSON.stringify(timeline), id]
+    )
+  },
+
+  async updateAssets(id: string, assets: MediaAsset[]): Promise<void> {
+    const project = await this.getById(id)
+    if (!project) return
+
+    let settingsRaw: Record<string, unknown> = {}
+    try {
+      const rows = (await window.veltrix.db.query(
+        'SELECT settings FROM projects WHERE id = ?',
+        [id]
+      )) as { settings: string }[]
+      if (rows.length > 0 && rows[0].settings) {
+        settingsRaw = JSON.parse(rows[0].settings)
+      }
+    } catch {
+      settingsRaw = {}
+    }
+
+    settingsRaw.assets = assets
+
+    await window.veltrix.db.run(
+      "UPDATE projects SET settings = ?, updated_at = datetime('now') WHERE id = ?",
+      [JSON.stringify(settingsRaw), id]
     )
   },
 
