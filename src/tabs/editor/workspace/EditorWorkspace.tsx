@@ -18,7 +18,7 @@ export const EditorWorkspace = ({ project }: EditorWorkspaceProps) => {
   }, [])
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Middle section: Tools + Preview + Assets */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <ToolsPanel />
