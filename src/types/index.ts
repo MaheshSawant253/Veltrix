@@ -108,3 +108,71 @@ export interface ApiKeyStatus {
   youtubeApiKey: string
   geminiApiKey: string
 }
+
+// ── Phase 4A: Video Editor ──
+
+export interface VideoSettings {
+  resolution: '1920x1080' | '1280x720' | '3840x2160'
+  fps: 24 | 30 | 60
+  aspectRatio: '16:9' | '9:16' | '1:1'
+  duration: number
+}
+
+export interface TimelineClip {
+  id: string
+  type: 'video' | 'audio' | 'text' | 'image'
+  trackIndex: number
+  startTime: number
+  duration: number
+  trimIn: number
+  trimOut: number
+  filePath?: string
+  content?: string
+  name: string
+  color?: string
+}
+
+export interface TimelineTrack {
+  id: string
+  type: 'video' | 'audio' | 'text'
+  label: string
+  clips: TimelineClip[]
+  isMuted: boolean
+  isLocked: boolean
+  height: number
+}
+
+export interface TimelineData {
+  tracks: TimelineTrack[]
+  totalDuration: number
+  playheadPosition: number
+}
+
+export interface VideoProject {
+  id: string
+  channelId?: string
+  title: string
+  description: string
+  niche: string
+  style: string
+  targetAudience: string
+  status: 'draft' | 'in_progress' | 'ready' | 'exported'
+  settings: VideoSettings
+  timeline: TimelineData
+  scriptIdea?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NewVideoFormData {
+  title: string
+  description: string
+  niche: string
+  style: 'Fast-paced' | 'Cinematic' | 'Educational' | 'Vlog' | 'Documentary'
+  targetAudience: string
+  aspectRatio: '16:9' | '9:16' | '1:1'
+  resolution: '1920x1080' | '1280x720' | '3840x2160'
+  fps: 24 | 30 | 60
+  channelId?: string
+  scriptIdea?: string
+}

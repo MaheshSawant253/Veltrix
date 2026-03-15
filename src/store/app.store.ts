@@ -15,6 +15,8 @@ interface AppState {
   removeToast: (id: string) => void
   pendingVideoIdea: VideoIdea | null
   setPendingVideoIdea: (idea: VideoIdea | null) => void
+  activeProjectId: string | null
+  setActiveProjectId: (id: string | null) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -37,5 +39,7 @@ export const useAppStore = create<AppState>((set) => ({
       toasts: state.toasts.filter((t) => t.id !== id)
     })),
   pendingVideoIdea: null,
-  setPendingVideoIdea: (idea) => set({ pendingVideoIdea: idea })
+  setPendingVideoIdea: (idea) => set({ pendingVideoIdea: idea }),
+  activeProjectId: null,
+  setActiveProjectId: (id) => set({ activeProjectId: id })
 }))
