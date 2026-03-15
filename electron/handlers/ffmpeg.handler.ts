@@ -1,89 +1,103 @@
-import { execFile } from 'child_process'
+import { exec } from 'child_process'
 import { existsSync } from 'fs'
 import ffmpegPath from 'ffmpeg-static'
 
-interface EncoderResult {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface EncoderInfo {
   encoder: string
   gpu: string
   isHardware: boolean
+  ffmpegPath: string
 }
 
-const testEncoder = (encoder: string): Promise<boolean> => {
-  return new Promise((resolve) => {
-    // Verify binary exists before attempting spawn
-    const binaryPath = ffmpegPath as string
-    if (!binaryPath || !existsSync(binaryPath)) {
-      resolve(false)
-      return
-    }
+// ─── Internal Helpers ─────────────────────────────────────────────────────────
 
-    const args = [
-      '-f', 'lavfi',
-      '-i', 'color=black:s=64x64:d=1',
-      '-c:v', encoder,
-      '-f', 'null',
-      '-'
-    ]
-
-    execFile(
-      binaryPath,
-      args,
-      {
-        timeout: 10000,
-        windowsHide: true
-        // shell: false is important — do NOT use shell: true
-        // as it breaks path resolution on Windows
-      },
-      (error) => {
-        resolve(!error)
-      }
-    )
-  })
+function getBinaryPath(): string | null {
+  const raw = ffmpegPath as string
+  if (!raw || !existsSync(raw)) return null
+  return raw
 }
 
-export const handleDetectEncoder = async (): Promise<EncoderResult> => {
-  try {
-    const encoders: { name: string; gpu: string; isHardware: boolean }[] = [
-      { name: 'h264_qsv', gpu: 'Intel Quick Sync', isHardware: true },
-      { name: 'libx264', gpu: 'CPU', isHardware: false }
-    ]
+// ─── Handlers (called from main.ts via IPC) ───────────────────────────────────
 
-    for (const enc of encoders) {
-      const supported = await testEncoder(enc.name)
-      if (supported) {
-        return { encoder: enc.name, gpu: enc.gpu, isHardware: enc.isHardware }
-      }
+/**
+ * Detect best available encoder.
+ * Does NOT run a test encode — just checks binary existence.
+ * Real encoder validation happens at first render attempt.
+ */
+export async function handleDetectEncoder(): Promise<EncoderInfo> {
+  const binaryPath = getBinaryPath()
+
+  if (!binaryPath) {
+    return {
+      encoder: 'libx264',
+      gpu: 'CPU',
+      isHardware: false,
+      ffmpegPath: ''
     }
+  }
 
-    // All encoders failed — return safe default
-    return { encoder: 'libx264', gpu: 'CPU', isHardware: false }
-  } catch (error) {
-    console.error('[Veltrix] Encoder detection failed:', error)
-    return { encoder: 'libx264', gpu: 'CPU', isHardware: false }
+  // On Intel iGPU: QSV requires Intel Media SDK runtime.
+  // We detect it by checking for the runtime DLL, not by test-spawning.
+  const qsvAvailable = checkQSVRuntime()
+
+  if (qsvAvailable) {
+    return {
+      encoder: 'h264_qsv',
+      gpu: 'Intel Quick Sync',
+      isHardware: true,
+      ffmpegPath: binaryPath
+    }
+  }
+
+  // Default: CPU libx264 — always available
+  return {
+    encoder: 'libx264',
+    gpu: 'CPU',
+    isHardware: false,
+    ffmpegPath: binaryPath
   }
 }
 
-export const handleGetVersion = async (): Promise<string> => {
+/**
+ * Check if Intel Quick Sync runtime DLLs are present on Windows.
+ * No process spawn needed — just filesystem check.
+ */
+function checkQSVRuntime(): boolean {
+  if (process.platform !== 'win32') return false
+
+  const qsvDlls = [
+    'C:\\Windows\\System32\\mfx_dispatch.dll',
+    'C:\\Windows\\System32\\libmfx64-gen.dll',
+    'C:\\Windows\\SysWOW64\\mfx_dispatch.dll',
+  ]
+
+  return qsvDlls.some(dll => existsSync(dll))
+}
+
+/**
+ * Get FFmpeg version string.
+ * Only called when user explicitly opens Settings tab — not at startup.
+ */
+export function handleGetVersion(): Promise<string> {
   return new Promise((resolve) => {
-    const binaryPath = ffmpegPath as string
-    if (!binaryPath || !existsSync(binaryPath)) {
+    const binaryPath = getBinaryPath()
+
+    if (!binaryPath) {
       resolve('FFmpeg not found')
       return
     }
 
-    execFile(
-      binaryPath,
-      ['-version'],
-      { timeout: 5000, windowsHide: true },
-      (error, stdout) => {
-        if (error) {
-          resolve('FFmpeg version unknown')
-          return
-        }
-        // Extract just first line: "ffmpeg version X.X.X ..."
-        const firstLine = stdout.split('\n')[0] ?? 'Unknown'
-        resolve(firstLine)
+    // Quote path to handle spaces on Windows
+    const cmd = `"${binaryPath}" -version`
+
+    exec(cmd, { timeout: 8000 }, (error, stdout) => {
+      if (error) {
+        resolve('FFmpeg version unknown')
+        return
       }
-    )
+      resolve(stdout.split('\n')[0] ?? 'Unknown')
+    })
   })
 }
