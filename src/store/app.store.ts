@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { EncoderInfo, Toast } from '../types'
+import type { EncoderInfo, Toast, VideoIdea } from '../types'
 
 type TabId = 'channels' | 'production' | 'editor' | 'settings'
 
@@ -13,6 +13,8 @@ interface AppState {
   toasts: Toast[]
   addToast: (toast: Omit<Toast, 'id'>) => void
   removeToast: (id: string) => void
+  pendingVideoIdea: VideoIdea | null
+  setPendingVideoIdea: (idea: VideoIdea | null) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -33,5 +35,7 @@ export const useAppStore = create<AppState>((set) => ({
   removeToast: (id) =>
     set((state) => ({
       toasts: state.toasts.filter((t) => t.id !== id)
-    }))
+    })),
+  pendingVideoIdea: null,
+  setPendingVideoIdea: (idea) => set({ pendingVideoIdea: idea })
 }))

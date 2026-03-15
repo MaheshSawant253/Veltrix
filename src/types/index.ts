@@ -55,3 +55,56 @@ export interface Toast {
   message: string
   type: 'success' | 'error' | 'info'
 }
+
+// ── Phase 3: Video Production ──
+
+export interface YouTubeVideo {
+  id: string
+  title: string
+  description: string
+  thumbnailUrl: string
+  publishedAt: string
+  viewCount: number
+  likeCount: number
+  commentCount: number
+  duration: string
+}
+
+export interface VideoComment {
+  id: string
+  text: string
+  likeCount: number
+  publishedAt: string
+}
+
+export interface CommentAnalysis {
+  sentiment: 'positive' | 'neutral' | 'negative' | 'mixed'
+  topThemes: string[]
+  audienceRequests: string[]
+  painPoints: string[]
+  summary: string
+}
+
+export interface TrendingTopic {
+  title: string
+  videoId: string
+  viewCount: number
+  channelTitle: string
+  thumbnailUrl: string
+  publishedAt: string
+}
+
+export interface VideoIdea {
+  id: string
+  title: string
+  description: string
+  targetKeyword: string
+  estimatedViews: string
+  reasonForSuggestion: string
+  outline: string[]
+}
+
+export interface ApiKeyStatus {
+  youtubeApiKey: string
+  geminiApiKey: string
+}
