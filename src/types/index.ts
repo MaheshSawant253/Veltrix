@@ -1,11 +1,21 @@
+export interface BrandingConfig {
+  primaryColor: string
+  fontStyle: 'Modern' | 'Classic' | 'Playful' | 'Bold'
+  videoStyle: 'Talking Head' | 'Screen Record' | 'Cinematic' | 'Animation' | 'Mixed'
+}
+
 export interface Channel {
   id: string
   name: string
-  handle?: string
-  niche?: string
-  style?: string
-  brandingConfig?: Record<string, unknown>
-  youtubeChannelId?: string
+  handle: string
+  description: string
+  niche: string
+  editingStyle: 'Fast-paced' | 'Cinematic' | 'Educational' | 'Vlog' | 'Documentary'
+  toneOfVoice: 'Educational' | 'Entertaining' | 'Inspirational' | 'Conversational' | 'Professional'
+  targetAudience: string
+  uploadFrequency: 'Daily' | '3x per week' | 'Weekly' | 'Bi-weekly' | 'Monthly'
+  brandingConfig: BrandingConfig
+  youtubeChannelId: string
   createdAt: string
   updatedAt: string
 }
@@ -38,4 +48,10 @@ export interface RenderJob {
   errorMessage?: string
   startedAt?: string
   completedAt?: string
+}
+
+export interface Toast {
+  id: string
+  message: string
+  type: 'success' | 'error' | 'info'
 }

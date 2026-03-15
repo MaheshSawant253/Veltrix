@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { EncoderInfo } from '../types'
+import type { EncoderInfo, Toast } from '../types'
 
 type TabId = 'channels' | 'production' | 'editor' | 'settings'
 
@@ -10,6 +10,9 @@ interface AppState {
   setEncoderInfo: (info: EncoderInfo) => void
   dbReady: boolean
   setDbReady: (ready: boolean) => void
+  toasts: Toast[]
+  addToast: (toast: Omit<Toast, 'id'>) => void
+  removeToast: (id: string) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -18,5 +21,17 @@ export const useAppStore = create<AppState>((set) => ({
   encoderInfo: null,
   setEncoderInfo: (info) => set({ encoderInfo: info }),
   dbReady: false,
-  setDbReady: (ready) => set({ dbReady: ready })
+  setDbReady: (ready) => set({ dbReady: ready }),
+  toasts: [],
+  addToast: (toast) =>
+    set((state) => ({
+      toasts: [
+        ...state.toasts.slice(-2),
+        { ...toast, id: crypto.randomUUID() }
+      ]
+    })),
+  removeToast: (id) =>
+    set((state) => ({
+      toasts: state.toasts.filter((t) => t.id !== id)
+    }))
 }))

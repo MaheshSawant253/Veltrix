@@ -1,12 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { MainLayout } from './layouts/MainLayout'
 import { useAppStore } from './store/app.store'
 import { logger } from './utils/logger'
 
 const App = () => {
   const setEncoderInfo = useAppStore((s) => s.setEncoderInfo)
+  const encoderInfo = useAppStore((s) => s.encoderInfo)
+  const hasDetected = useRef(false)
 
   useEffect(() => {
+    if (hasDetected.current || encoderInfo) return
+    hasDetected.current = true
+
     const detectEncoder = async () => {
       try {
         logger.log('Detecting encoder...')
@@ -19,7 +24,7 @@ const App = () => {
     }
 
     detectEncoder()
-  }, [setEncoderInfo])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return <MainLayout />
 }
