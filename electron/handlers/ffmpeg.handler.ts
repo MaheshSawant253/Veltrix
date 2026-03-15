@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
-import { join } from 'path'
 import { existsSync } from 'fs'
+import ffmpegPath from 'ffmpeg-static'
 
 interface EncoderResult {
   encoder: string
@@ -8,30 +8,15 @@ interface EncoderResult {
   isHardware: boolean
 }
 
-const getFfmpegPath = (): string => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const staticPath = require('ffmpeg-static') as string | null
-
-  if (staticPath && existsSync(staticPath)) {
-    console.log(`[Veltrix] Found bundled ffmpeg at: ${staticPath}`)
-    return staticPath
-  }
-
-  // Fallback 1: look in node_modules directly
-  const fallback = join(__dirname, '../../node_modules/ffmpeg-static/ffmpeg.exe')
-  if (existsSync(fallback)) {
-    console.log(`[Veltrix] Found ffmpeg in node_modules directly: ${fallback}`)
-    return fallback
-  }
-
-  // Fallback 2: System ffmpeg
-  console.log('[Veltrix] Bundled ffmpeg not found or inaccessible, trying system ffmpeg...')
-  return 'ffmpeg'
-}
-
 const testEncoder = (encoder: string): Promise<boolean> => {
   return new Promise((resolve) => {
-    let binary = getFfmpegPath()
+    // Verify binary exists before attempting spawn
+    const binaryPath = ffmpegPath as string
+    if (!binaryPath || !existsSync(binaryPath)) {
+      resolve(false)
+      return
+    }
+
     const args = [
       '-f', 'lavfi',
       '-i', 'color=black:s=64x64:d=1',
@@ -40,26 +25,19 @@ const testEncoder = (encoder: string): Promise<boolean> => {
       '-'
     ]
 
-    execFile(binary, args, { timeout: 15000 }, (error) => {
-      if (error) {
-        // If bundled failed with spawn error, try system fallback immediately
-        if (binary !== 'ffmpeg' && ((error as any).code === 'UNKNOWN' || (error as any).syscall === 'spawn')) {
-          binary = 'ffmpeg'
-          execFile(binary, args, { timeout: 15000 }, (err2) => {
-            if (err2) {
-              resolve(false)
-            } else {
-              resolve(true)
-            }
-          })
-          return
-        }
-
-        resolve(false)
-        return
+    execFile(
+      binaryPath,
+      args,
+      {
+        timeout: 10000,
+        windowsHide: true
+        // shell: false is important — do NOT use shell: true
+        // as it breaks path resolution on Windows
+      },
+      (error) => {
+        resolve(!error)
       }
-      resolve(true)
-    })
+    )
   })
 }
 
@@ -77,28 +55,35 @@ export const handleDetectEncoder = async (): Promise<EncoderResult> => {
       }
     }
 
+    // All encoders failed — return safe default
     return { encoder: 'libx264', gpu: 'CPU', isHardware: false }
   } catch (error) {
-    console.error('[Veltrix] handleDetectEncoder fatal error:', error)
+    console.error('[Veltrix] Encoder detection failed:', error)
     return { encoder: 'libx264', gpu: 'CPU', isHardware: false }
   }
 }
 
 export const handleGetVersion = async (): Promise<string> => {
   return new Promise((resolve) => {
-    try {
-      const binary = getFfmpegPath()
-      execFile(binary, ['-version'], { timeout: 5000 }, (error, stdout) => {
+    const binaryPath = ffmpegPath as string
+    if (!binaryPath || !existsSync(binaryPath)) {
+      resolve('FFmpeg not found')
+      return
+    }
+
+    execFile(
+      binaryPath,
+      ['-version'],
+      { timeout: 5000, windowsHide: true },
+      (error, stdout) => {
         if (error) {
-          resolve('unknown')
+          resolve('FFmpeg version unknown')
           return
         }
-        const versionMatch = stdout.match(/ffmpeg version (\S+)/)
-        resolve(versionMatch ? versionMatch[1] : 'unknown')
-      })
-    } catch (error) {
-      console.error('[Veltrix] FFmpeg version check failed:', error)
-      resolve('unknown')
-    }
+        // Extract just first line: "ffmpeg version X.X.X ..."
+        const firstLine = stdout.split('\n')[0] ?? 'Unknown'
+        resolve(firstLine)
+      }
+    )
   })
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, ChevronRight, ChevronLeft, Check } from 'lucide-react'
 import type { Channel, BrandingConfig } from '../../types'
 
@@ -61,6 +61,19 @@ const defaultFormData: ChannelFormData = {
   youtubeChannelId: ''
 }
 
+const channelToFormData = (ch: Channel): ChannelFormData => ({
+  name: ch.name,
+  handle: ch.handle,
+  description: ch.description,
+  niche: ch.niche,
+  editingStyle: ch.editingStyle,
+  toneOfVoice: ch.toneOfVoice,
+  targetAudience: ch.targetAudience,
+  uploadFrequency: ch.uploadFrequency,
+  brandingConfig: { ...ch.brandingConfig },
+  youtubeChannelId: ch.youtubeChannelId
+})
+
 const PillButton = ({
   label,
   selected,
@@ -96,26 +109,22 @@ export const CreateChannelModal = ({
   editChannel
 }: CreateChannelModalProps) => {
   const [step, setStep] = useState(1)
-  const [formData, setFormData] = useState<ChannelFormData>(
-    editChannel
-      ? {
-          name: editChannel.name,
-          handle: editChannel.handle,
-          description: editChannel.description,
-          niche: editChannel.niche,
-          editingStyle: editChannel.editingStyle,
-          toneOfVoice: editChannel.toneOfVoice,
-          targetAudience: editChannel.targetAudience,
-          uploadFrequency: editChannel.uploadFrequency,
-          brandingConfig: { ...editChannel.brandingConfig },
-          youtubeChannelId: editChannel.youtubeChannelId
-        }
-      : { ...defaultFormData }
-  )
+  const [formData, setFormData] = useState<ChannelFormData>({ ...defaultFormData })
   const [nameError, setNameError] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [showNicheSuggestions, setShowNicheSuggestions] = useState(false)
+
+  // Reset form state whenever modal opens or editChannel changes
+  useEffect(() => {
+    if (isOpen) {
+      setStep(1)
+      setNameError('')
+      setSaveError('')
+      setSaving(false)
+      setFormData(editChannel ? channelToFormData(editChannel) : { ...defaultFormData })
+    }
+  }, [isOpen, editChannel])
 
   if (!isOpen) return null
 

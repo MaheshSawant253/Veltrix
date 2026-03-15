@@ -1,30 +1,28 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { MainLayout } from './layouts/MainLayout'
 import { useAppStore } from './store/app.store'
-import { logger } from './utils/logger'
 
 const App = () => {
-  const setEncoderInfo = useAppStore((s) => s.setEncoderInfo)
   const encoderInfo = useAppStore((s) => s.encoderInfo)
-  const hasDetected = useRef(false)
+  const setEncoderInfo = useAppStore((s) => s.setEncoderInfo)
 
   useEffect(() => {
-    if (hasDetected.current || encoderInfo) return
-    hasDetected.current = true
+    // Guard: skip if already detected
+    if (encoderInfo !== null) return
 
-    const detectEncoder = async () => {
+    const detect = async () => {
       try {
-        logger.log('Detecting encoder...')
-        const result = await window.veltrix.ffmpeg.detectEncoder()
-        setEncoderInfo(result)
-        logger.log('Encoder detected:', JSON.stringify(result))
-      } catch (error) {
-        logger.error('Encoder detection failed:', error)
+        const info = await window.veltrix.ffmpeg.detectEncoder()
+        setEncoderInfo(info)
+      } catch (err) {
+        console.error('Encoder detection failed:', err)
+        // Set safe fallback so we never block the app
+        setEncoderInfo({ encoder: 'libx264', gpu: 'CPU', isHardware: false })
       }
     }
 
-    detectEncoder()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    detect()
+  }, []) // Empty dependency array — runs once only
 
   return <MainLayout />
 }

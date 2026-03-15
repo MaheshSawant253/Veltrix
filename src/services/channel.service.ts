@@ -34,34 +34,8 @@ const mapRowToChannel = (row: ChannelRow): Channel => ({
   updatedAt: row.updated_at
 })
 
-const ensureColumns = async (): Promise<void> => {
-  const columnsToAdd = [
-    { name: 'description', type: 'TEXT DEFAULT ""' },
-    { name: 'editing_style', type: 'TEXT DEFAULT "Educational"' },
-    { name: 'tone_of_voice', type: 'TEXT DEFAULT "Professional"' },
-    { name: 'target_audience', type: 'TEXT DEFAULT ""' },
-    { name: 'upload_frequency', type: 'TEXT DEFAULT "Weekly"' }
-  ]
-
-  for (const col of columnsToAdd) {
-    try {
-      await window.veltrix.db.run(
-        `ALTER TABLE channels ADD COLUMN ${col.name} ${col.type}`
-      )
-    } catch {
-      // Column already exists — safe to ignore
-    }
-  }
-}
-
-let columnsEnsured = false
-
 export const channelService = {
   async getAll(): Promise<Channel[]> {
-    if (!columnsEnsured) {
-      await ensureColumns()
-      columnsEnsured = true
-    }
     const rows = (await window.veltrix.db.query(
       'SELECT * FROM channels ORDER BY created_at DESC'
     )) as ChannelRow[]
@@ -69,10 +43,6 @@ export const channelService = {
   },
 
   async getById(id: string): Promise<Channel | null> {
-    if (!columnsEnsured) {
-      await ensureColumns()
-      columnsEnsured = true
-    }
     const rows = (await window.veltrix.db.query(
       'SELECT * FROM channels WHERE id = ?',
       [id]
@@ -83,10 +53,6 @@ export const channelService = {
   async create(
     data: Omit<Channel, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<Channel> {
-    if (!columnsEnsured) {
-      await ensureColumns()
-      columnsEnsured = true
-    }
     const id = crypto.randomUUID()
     await window.veltrix.db.run(
       `INSERT INTO channels (

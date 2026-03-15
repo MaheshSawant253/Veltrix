@@ -28,6 +28,13 @@ export const initDatabase = (): void => {
     const schema = readFileSync(schemaPath, 'utf-8')
     db.exec(schema)
 
+    // Add columns introduced in Phase 2 (individual try/catch to skip if already exists)
+    try { db.exec('ALTER TABLE channels ADD COLUMN description TEXT DEFAULT ""') } catch { /* Column already exists, skip */ }
+    try { db.exec('ALTER TABLE channels ADD COLUMN editing_style TEXT DEFAULT "Educational"') } catch { /* Column already exists, skip */ }
+    try { db.exec('ALTER TABLE channels ADD COLUMN tone_of_voice TEXT DEFAULT "Professional"') } catch { /* Column already exists, skip */ }
+    try { db.exec('ALTER TABLE channels ADD COLUMN target_audience TEXT DEFAULT ""') } catch { /* Column already exists, skip */ }
+    try { db.exec('ALTER TABLE channels ADD COLUMN upload_frequency TEXT DEFAULT "Weekly"') } catch { /* Column already exists, skip */ }
+
     console.log(`[Veltrix] Database initialized at: ${dbPath}`)
   } catch (error) {
     console.error('[Veltrix] Database initialization failed:', error)
