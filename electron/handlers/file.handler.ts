@@ -65,8 +65,8 @@ export const handleGetMediaDuration = (filePath: string): Promise<number> => {
 
       execFile(
         binaryPath,
-        ['-i', filePath, '-f', 'null', '-'],
-        { timeout: 10000, windowsHide: true },
+        ['-i', filePath],
+        { timeout: 5000, windowsHide: true },
         (_error, _stdout, stderr) => {
           // ffmpeg writes info to stderr
           const output = stderr || ''

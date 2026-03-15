@@ -204,8 +204,15 @@ export const AssetPanel = ({
                 {asset.fileType === 'video' ? (
                   <VideoThumbnail filePath={asset.filePath} />
                 ) : (
-                  <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded bg-[#1a1a1a]">
-                    {fileTypeIcon(asset.fileType)}
+                  <div className="relative h-10 w-14 shrink-0 overflow-hidden rounded bg-[#1a1a1a]">
+                    <img
+                      src={'file:///' + asset.filePath.replace(/\\/g, '/')}
+                      alt={asset.fileName}
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
