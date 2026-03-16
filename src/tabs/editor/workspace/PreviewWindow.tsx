@@ -1,16 +1,9 @@
-import { useRef, useEffect, useCallback } from 'react'
-import type { VideoProject, TimelineClip } from '../../../types'
-import {
-  SkipBack,
-  Play,
-  Pause,
-  SkipForward,
-  Volume2,
-  Maximize
-} from 'lucide-react'
+import { useRef, useEffect, useState } from 'react'
+import type { VideoProject, TimelineData, TimelineClip } from '../../../types'
 
 interface PreviewWindowProps {
   project: VideoProject
+  timeline: TimelineData
   currentTime: number
   isPlaying: boolean
   onPlayPause: () => void
@@ -24,8 +17,6 @@ const resolutionLabel: Record<string, string> = {
   '3840x2160': '4K'
 }
 
-const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif']
-
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -33,17 +24,9 @@ function formatTime(seconds: number): string {
   return [h, m, s].map((v) => v.toString().padStart(2, '0')).join(':')
 }
 
-function fileToUrl(filePath: string): string {
-  return 'file:///' + filePath.replace(/\\/g, '/')
-}
-
-function isImageFile(filePath: string): boolean {
-  const ext = filePath.split('.').pop()?.toLowerCase() || ''
-  return IMAGE_EXTS.includes(ext)
-}
-
 export const PreviewWindow = ({
   project,
+  timeline,
   currentTime,
   isPlaying,
   onPlayPause,
@@ -52,281 +35,254 @@ export const PreviewWindow = ({
 }: PreviewWindowProps) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const animFrameRef = useRef<number>(0)
-  const isPlayingRef = useRef(false)
-  const currentClipRef = useRef<string>('')
-  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map())
-
-  const aspectRatio = project.settings.aspectRatio
-
-  // Find clip at given time on video tracks
-  const findClipAtTime = useCallback(
-    (time: number): TimelineClip | null => {
-      for (const track of project.timeline.tracks) {
-        if (track.type !== 'video') continue
-        for (const clip of track.clips) {
-          if (
-            clip.filePath &&
-            time >= clip.startTime &&
-            time < clip.startTime + clip.duration
-          ) {
-            return clip
-          }
-        }
-      }
-      return null
-    },
-    [project.timeline.tracks]
-  )
-
-  // Draw an image to the canvas
-  const drawImage = useCallback((src: string) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const cached = imageCache.current.get(src)
-    if (cached) {
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        // Contain the image
-        const scale = Math.min(canvas.width / cached.width, canvas.height / cached.height)
-        const w = cached.width * scale
-        const h = cached.height * scale
-        const x = (canvas.width - w) / 2
-        const y = (canvas.height - h) / 2
-        ctx.drawImage(cached, x, y, w, h)
-      }
-      return
-    }
-
-    const img = new Image()
-    img.onload = () => {
-      imageCache.current.set(src, img)
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        const scale = Math.min(canvas.width / img.width, canvas.height / img.height)
-        const w = img.width * scale
-        const h = img.height * scale
-        const x = (canvas.width - w) / 2
-        const y = (canvas.height - h) / 2
-        ctx.drawImage(img, x, y, w, h)
-      }
-    }
-    img.src = fileToUrl(src)
-  }, [])
-
-  // Draw a video frame to canvas
-  const drawVideoFrame = useCallback(() => {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) return
-    const ctx = canvas.getContext('2d')
-    if (ctx && video.readyState >= 2) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    }
-  }, [])
-
-  // Render frame loop for video playback
-  const renderLoop = useCallback(() => {
-    if (!isPlayingRef.current) return
-    drawVideoFrame()
-    animFrameRef.current = requestAnimationFrame(renderLoop)
-  }, [drawVideoFrame])
-
-  // Handle play/pause
-  useEffect(() => {
-    isPlayingRef.current = isPlaying
-    const video = videoRef.current
-
-    if (isPlaying) {
-      const clip = findClipAtTime(currentTime)
-      if (clip && clip.filePath) {
-        if (isImageFile(clip.filePath)) {
-          // Images: just draw, no animation needed
-          drawImage(clip.filePath)
-        } else if (video) {
-          const url = fileToUrl(clip.filePath)
-          if (currentClipRef.current !== clip.id) {
-            video.src = url
-            currentClipRef.current = clip.id
-          }
-          video.currentTime = currentTime - clip.startTime + clip.trimIn
-          video.play().catch(() => {/* ignore */})
-          animFrameRef.current = requestAnimationFrame(renderLoop)
-        }
-      }
-    } else {
-      if (video) video.pause()
-      cancelAnimationFrame(animFrameRef.current)
-    }
-
-    return () => cancelAnimationFrame(animFrameRef.current)
-  }, [isPlaying, currentTime, findClipAtTime, renderLoop, drawImage])
-
-  // Handle seek (when paused) — show correct frame
-  useEffect(() => {
-    if (isPlaying) return
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const clip = findClipAtTime(currentTime)
-    if (!clip || !clip.filePath) {
-      // No clip at this time — clear canvas
-      const ctx = canvas.getContext('2d')
-      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
-      return
-    }
-
-    if (isImageFile(clip.filePath)) {
-      drawImage(clip.filePath)
-    } else {
-      const video = videoRef.current
-      if (!video) return
-      const url = fileToUrl(clip.filePath)
-      if (currentClipRef.current !== clip.id) {
-        video.src = url
-        currentClipRef.current = clip.id
-      }
-      video.currentTime = currentTime - clip.startTime + clip.trimIn
-      video.addEventListener('seeked', drawVideoFrame, { once: true })
-    }
-  }, [currentTime, isPlaying, findClipAtTime, drawImage, drawVideoFrame])
-
-  // Progress bar click
-  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (duration <= 0) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const ratio = (e.clientX - rect.left) / rect.width
-    onSeek(Math.max(0, Math.min(duration, ratio * duration)))
+  const [activeMode, setActiveMode] = useState<'video' | 'canvas'>('canvas')
+  const currentTimeRef = useRef(currentTime)
+  
+  // Find which video/audio clip is active at a given time
+  function getActiveVideoClip(time: number): TimelineClip | null {
+    const videoTrack = timeline.tracks.find(t => t.type === 'video')
+    if (!videoTrack) return null
+    return videoTrack.clips.find(clip =>
+      time >= clip.startTime && 
+      time < clip.startTime + clip.duration
+    ) ?? null
   }
 
-  const progressWidth = duration > 0 ? (currentTime / duration) * 100 : 0
+  // Convert Windows path to file:// URL
+  function toFileUrl(filePath: string): string {
+    return 'file:///' + filePath.replace(/\\/g, '/').replace(/ /g, '%20')
+  }
+
+  // Draw image contained instead of stretching
+  function drawImageContained(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement | HTMLVideoElement,
+    canvasW: number,
+    canvasH: number
+  ): void {
+    const imgW = img instanceof HTMLImageElement 
+      ? img.naturalWidth : (img as HTMLVideoElement).videoWidth
+    const imgH = img instanceof HTMLImageElement 
+      ? img.naturalHeight : (img as HTMLVideoElement).videoHeight
+
+    if (!imgW || !imgH) return
+
+    const scale = Math.min(canvasW / imgW, canvasH / imgH)
+    const drawW = imgW * scale
+    const drawH = imgH * scale
+    const offsetX = (canvasW - drawW) / 2
+    const offsetY = (canvasH - drawH) / 2
+
+    // Fill background black first
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, canvasW, canvasH)
+
+    ctx.drawImage(img, offsetX, offsetY, drawW, drawH)
+  }
+
+  // When play state or currentTime changes
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const activeClip = getActiveVideoClip(currentTime)
+
+    if (activeClip?.filePath) {
+      // Check if it's an image
+      const ext = activeClip.filePath.split('.').pop()?.toLowerCase() || ''
+      if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+        setActiveMode('canvas')
+        video.pause() // assure it's paused
+        
+        const canvas = canvasRef.current
+        if (canvas) {
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            const img = new Image()
+            img.onload = () => {
+              drawImageContained(ctx, img, canvas.width, canvas.height)
+            }
+            img.src = toFileUrl(activeClip.filePath)
+          }
+        }
+      } else {
+        const fileUrl = toFileUrl(activeClip.filePath)
+        
+        // Only change src if different clip
+        if (video.src !== fileUrl) {
+          video.src = fileUrl
+          video.load()
+        }
+
+        // Seek to correct position within clip
+        const clipLocalTime = 
+          currentTime - activeClip.startTime + activeClip.trimIn
+        
+        if (Math.abs(video.currentTime - clipLocalTime) > 0.3) {
+          video.currentTime = clipLocalTime
+        }
+
+        setActiveMode('video')
+
+        if (isPlaying) {
+          video.play().catch(err => {
+            console.error('Playback error:', err)
+          })
+        } else {
+          video.pause()
+        }
+      }
+    } else {
+      // No video clip — show black canvas
+      video.pause()
+      setActiveMode('canvas')
+      const canvas = canvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.fillStyle = '#000'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+        }
+      }
+    }
+  }, [isPlaying, currentTime, timeline.tracks])
+
+  // Track video time → update parent currentTime
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const handleTimeUpdate = () => {
+      const activeClip = getActiveVideoClip(currentTimeRef.current)
+      if (!activeClip) return
+      const timelineTime = 
+        video.currentTime - activeClip.trimIn + activeClip.startTime
+      onSeek(timelineTime)
+      currentTimeRef.current = timelineTime
+    }
+
+    const handleEnded = () => {
+      // Only pause if this is the very end of the duration
+      if (currentTimeRef.current >= duration - 0.5) {
+        onPlayPause()
+      }
+    }
+
+    video.addEventListener('timeupdate', handleTimeUpdate)
+    video.addEventListener('ended', handleEnded)
+    return () => {
+      video.removeEventListener('timeupdate', handleTimeUpdate)
+      video.removeEventListener('ended', handleEnded)
+    }
+  }, [duration, onSeek, onPlayPause, timeline.tracks])
+
+  // Keep a ref of current time for the timeupdate callback
+  useEffect(() => {
+    currentTimeRef.current = currentTime
+  }, [currentTime])
 
   return (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: '#0a0a0a',
-        overflow: 'hidden'
-      }}
-    >
-      {/* Hidden video element for decoding */}
-      <video ref={videoRef} className="hidden" muted preload="auto" />
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', 
+      flexDirection: 'column', backgroundColor: '#0a0a0a',
+      overflow: 'hidden' }}>
 
-      {/* Canvas area */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
+      {/* Preview area */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        overflow: 'hidden', padding: '8px', position: 'relative' }}>
+
+        <div style={{ 
           position: 'relative',
-          padding: 8
-        }}
-      >
-        <div
-          style={{
-            position: 'relative',
-            width: '100%',
-            maxHeight: '100%',
-            aspectRatio: aspectRatio.replace(':', '/')
-          }}
-        >
+          width: '100%', 
+          maxHeight: '100%',
+          aspectRatio: project.settings.aspectRatio.replace(':', '/'),
+          backgroundColor: '#000',
+          overflow: 'hidden'
+        }}>
+          {/* Video element — used for video/audio playback */}
+          <video
+            ref={videoRef}
+            style={{
+              width: '100%', 
+              height: '100%',
+              objectFit: 'contain',   // ← letterbox, no stretch
+              display: activeMode === 'video' ? 'block' : 'none',
+              backgroundColor: '#000',
+            }}
+          />
+
+          {/* Canvas — used for images and empty state */}
           <canvas
             ref={canvasRef}
-            width={960}
-            height={540}
+            width={1920}
+            height={1080}
             style={{
               width: '100%',
               height: '100%',
-              display: 'block',
+              display: activeMode === 'canvas' ? 'block' : 'none',
               backgroundColor: '#000',
-              borderRadius: 4
             }}
           />
-          <div
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              background: 'rgba(0,0,0,0.6)',
-              color: '#fff',
-              fontSize: 11,
-              padding: '2px 8px',
-              borderRadius: 4
-            }}
-          >
+
+          {/* Resolution badge */}
+          <div style={{ position: 'absolute', top: 8, right: 8,
+            background: 'rgba(0,0,0,0.6)', color: '#fff',
+            fontSize: 11, padding: '2px 8px', borderRadius: 4 }}>
             {resolutionLabel[project.settings.resolution] || '1080p'}
           </div>
         </div>
       </div>
 
       {/* Progress bar */}
-      <div
-        className="h-1 w-full cursor-pointer bg-[#2a2a2a]"
-        onClick={handleProgressClick}
-        style={{ flexShrink: 0 }}
+      <div 
+        style={{ height: 4, backgroundColor: '#2a2a2a', 
+          flexShrink: 0, cursor: 'pointer' }}
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect()
+          const ratio = (e.clientX - rect.left) / rect.width
+          onSeek(ratio * duration)
+        }}
       >
-        <div
-          className="h-full bg-accent transition-[width] duration-100"
-          style={{ width: `${progressWidth}%` }}
-        />
+        <div style={{
+          height: '100%',
+          width: duration > 0 
+            ? `${(currentTime / duration) * 100}%` : '0%',
+          backgroundColor: '#6366f1',
+          transition: 'width 0.1s linear',
+        }} />
       </div>
 
       {/* Controls bar */}
-      <div
-        style={{
-          flexShrink: 0,
-          height: 48,
-          backgroundColor: '#111',
-          borderTop: '1px solid #2a2a2a',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 16px'
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onSeek(0)}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary"
-          >
-            <SkipBack size={14} />
-          </button>
-          <button
-            onClick={onPlayPause}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/20 text-accent transition-colors hover:bg-accent/30"
-          >
-            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-          </button>
-          <button
-            onClick={() => onSeek(duration)}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary"
-          >
-            <SkipForward size={14} />
-          </button>
+      <div style={{ flexShrink: 0, height: 48,
+        backgroundColor: '#111', borderTop: '1px solid #2a2a2a',
+        display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', padding: '0 16px' }}>
+
+        {/* Playback buttons */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {[
+            { icon: '⏮', action: () => onSeek(0) },
+            { icon: isPlaying ? '⏸' : '▶', action: onPlayPause },
+            { icon: '⏭', action: () => onSeek(duration) },
+          ].map((btn, i) => (
+            <button key={i}
+              onClick={btn.action}
+              style={{ width: 32, height: 32, borderRadius: '50%',
+                background: 'rgba(255,255,255,0.08)', border: 'none',
+                color: '#fff', cursor: 'pointer', fontSize: 14 }}>
+              {btn.icon}
+            </button>
+          ))}
         </div>
 
-        <span className="font-mono text-[13px] text-text-secondary">
+        {/* Timecode */}
+        <div style={{ fontFamily: 'monospace', fontSize: 13,
+          color: '#a1a1aa' }}>
           {formatTime(currentTime)} / {formatTime(duration)}
-        </span>
-
-        <div className="flex items-center gap-2">
-          <button className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary">
-            <Volume2 size={14} />
-          </button>
-          <button className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary">
-            <Maximize size={14} />
-          </button>
         </div>
+
+        {/* Volume (visual) */}
+        <div style={{ color: '#a1a1aa', fontSize: 16 }}>🔊</div>
       </div>
     </div>
   )

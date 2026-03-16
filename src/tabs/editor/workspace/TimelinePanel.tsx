@@ -8,6 +8,7 @@ interface TimelinePanelProps {
   onTimelineUpdate: (timeline: TimelineData) => void
   currentTime: number
   onSeek: (time: number) => void
+  onClipDelete?: (trackId: string, clipId: string) => void
 }
 
 const TRACK_COLORS: Record<string, { bg: string; border: string }> = {
@@ -34,20 +35,23 @@ const ClipBlock = ({
   clip,
   track,
   pxPerSec,
-  onDragStart
+  onDragStart,
+  onDelete
 }: {
   clip: TimelineClip
   track: TrackType
   pxPerSec: number
   onDragStart: (e: React.MouseEvent, type: DragState['type']) => void
+  onDelete?: () => void
 }) => {
+  const [isHovered, setIsHovered] = useState(false)
   const colors = TRACK_COLORS[track.type] || TRACK_COLORS.video
   const width = Math.max(clip.duration * pxPerSec, 4)
   const left = clip.startTime * pxPerSec
 
   return (
     <div
-      className="absolute top-1 cursor-grab select-none overflow-hidden rounded"
+      className="absolute top-1 cursor-grab select-none overflow-hidden rounded group"
       style={{
         left,
         width,
@@ -55,11 +59,27 @@ const ClipBlock = ({
         background: colors.bg,
         border: `1px solid ${colors.border}`
       }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onMouseDown={(e) => {
         e.stopPropagation()
         onDragStart(e, 'move')
       }}
     >
+      {/* Delete button */}
+      {isHovered && onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          className="absolute right-1 top-1 z-20 flex h-4 w-4 items-center justify-center rounded-full bg-[#ef4444] text-xs text-white hover:bg-[#dc2626]"
+          title="Delete clip"
+        >
+          ×
+        </button>
+      )}
+
       {/* Left trim handle */}
       <div
         className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize"
@@ -92,7 +112,8 @@ export const TimelinePanel = ({
   timeline,
   onTimelineUpdate,
   currentTime,
-  onSeek
+  onSeek,
+  onClipDelete
 }: TimelinePanelProps) => {
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -284,6 +305,7 @@ export const TimelinePanel = ({
                   track={track}
                   pxPerSec={pxPerSec}
                   onDragStart={(e, type) => startClipDrag(e, type, track.id, clip)}
+                  onDelete={onClipDelete ? () => onClipDelete(track.id, clip.id) : undefined}
                 />
               ))}
 

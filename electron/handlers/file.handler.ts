@@ -48,43 +48,45 @@ export const handleOpenMediaDialog = async (): Promise<MediaFileInfo[]> => {
   })
 }
 
-export const handleGetMediaDuration = (filePath: string): Promise<number> => {
+export function handleGetMediaDuration(filePath: string): Promise<number> {
   return new Promise((resolve) => {
+    // We already require exec & existsSync, let's use ffmpeg-static
+    let binaryPath: string
     try {
-      // Use ffmpeg-static or system ffmpeg
-      let binaryPath: string
-      try {
-        binaryPath = require('ffmpeg-static') as string
-      } catch {
-        binaryPath = 'ffmpeg'
-      }
-
-      if (!binaryPath || !existsSync(binaryPath)) {
-        binaryPath = 'ffmpeg'
-      }
-
-      execFile(
-        binaryPath,
-        ['-i', filePath],
-        { timeout: 5000, windowsHide: true },
-        (_error, _stdout, stderr) => {
-          // ffmpeg writes info to stderr
-          const output = stderr || ''
-          const match = output.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/)
-          if (match) {
-            const hours = parseInt(match[1], 10)
-            const minutes = parseInt(match[2], 10)
-            const seconds = parseInt(match[3], 10)
-            const centiseconds = parseInt(match[4], 10)
-            resolve(hours * 3600 + minutes * 60 + seconds + centiseconds / 100)
-          } else {
-            resolve(0)
-          }
-        }
-      )
+      binaryPath = require('ffmpeg-static') as string
     } catch {
-      resolve(0)
+      binaryPath = 'ffmpeg'
     }
+
+    if (!binaryPath || !existsSync(binaryPath)) {
+      resolve(0)
+      return
+    }
+
+    // ffprobe-style: use ffmpeg -i to read duration from stderr
+    // Quote both binary and path for Windows spaces
+    const cmd = `"${binaryPath}" -i "${filePath}"`
+
+    // Note using child_process.exec instead of execFile for this
+    import('child_process').then(({ exec }) => {
+      exec(cmd, { timeout: 10000 }, (_error, _stdout, stderr) => {
+        // FFmpeg always writes file info to stderr
+        // Duration line looks like: "  Duration: 00:01:23.45,"
+        const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/)
+
+        if (!match) {
+          resolve(0)
+          return
+        }
+
+        const hours = parseInt(match[1], 10)
+        const minutes = parseInt(match[2], 10)
+        const seconds = parseFloat(match[3])
+        const total = hours * 3600 + minutes * 60 + seconds
+
+        resolve(Math.round(total * 100) / 100) // round to 2dp
+      })
+    })
   })
 }
 

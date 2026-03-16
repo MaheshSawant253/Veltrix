@@ -151,7 +151,7 @@ export interface MediaAsset {
   id: string
   filePath: string
   fileName: string
-  fileType: 'video' | 'audio' | 'image'
+  fileType: 'video' | 'audio' | 'image' | 'text'
   fileSize: number
   duration: number
   extension: string

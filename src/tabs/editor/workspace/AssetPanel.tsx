@@ -279,7 +279,21 @@ export const AssetPanel = ({
 
         {activeTab === 'text' && (
           <div className="space-y-2">
-            <button className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border py-4 text-xs text-text-secondary transition-colors hover:border-accent hover:text-accent">
+            <button
+              onClick={() => {
+                onAddToTimeline({
+                  id: uuidv4(),
+                  filePath: '',
+                  fileName: 'New Text',
+                  fileType: 'text',
+                  fileSize: 0,
+                  duration: 5,
+                  extension: '',
+                  addedAt: new Date().toISOString()
+                })
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border py-4 text-xs text-text-secondary transition-colors hover:border-accent hover:text-accent"
+            >
               <Type size={14} />
               Add Text
             </button>
@@ -290,6 +304,18 @@ export const AssetPanel = ({
               {textPresets.map((preset) => (
                 <button
                   key={preset.label}
+                  onClick={() => {
+                    onAddToTimeline({
+                      id: uuidv4(),
+                      filePath: '',
+                      fileName: preset.label,
+                      fileType: 'text',
+                      fileSize: 0,
+                      duration: 5,
+                      extension: '',
+                      addedAt: new Date().toISOString()
+                    })
+                  }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-2"
                 >
                   <FileText size={14} className="shrink-0 text-text-secondary" />

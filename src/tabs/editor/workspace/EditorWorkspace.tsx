@@ -84,6 +84,36 @@ export const EditorWorkspace = ({ project }: EditorWorkspaceProps) => {
     [project, toast]
   )
 
+  const calculateTotalDuration = useCallback((tracks: import('../../../types').TimelineTrack[]): number => {
+    let max = 0
+    tracks.forEach((track) => {
+      track.clips.forEach((clip) => {
+        const end = clip.startTime + clip.duration
+        if (end > max) max = end
+      })
+    })
+    return max
+  }, [])
+
+  const handleClipDelete = useCallback(
+    (trackId: string, clipId: string) => {
+      const updatedTracks = timeline.tracks.map((track) => {
+        if (track.id !== trackId) return track
+        return {
+          ...track,
+          clips: track.clips.filter((c) => c.id !== clipId)
+        }
+      })
+      const updatedTimeline = {
+        ...timeline,
+        tracks: updatedTracks,
+        totalDuration: calculateTotalDuration(updatedTracks)
+      }
+      handleTimelineUpdate(updatedTimeline)
+    },
+    [timeline, handleTimelineUpdate, calculateTotalDuration]
+  )
+
   const handleAddToTimeline = useCallback(
     (asset: MediaAsset) => {
       const trackType = asset.fileType === 'image' ? 'video' : asset.fileType
@@ -118,24 +148,16 @@ export const EditorWorkspace = ({ project }: EditorWorkspaceProps) => {
         clips: [...track.clips, newClip]
       }
 
-      // Recalculate totalDuration
-      let maxEnd = 0
-      for (const t of updatedTracks) {
-        for (const c of t.clips) {
-          maxEnd = Math.max(maxEnd, c.startTime + c.duration)
-        }
-      }
-
       const updated: TimelineData = {
         ...timeline,
         tracks: updatedTracks,
-        totalDuration: maxEnd
+        totalDuration: calculateTotalDuration(updatedTracks)
       }
 
       handleTimelineUpdate(updated)
       toast(`Added "${asset.fileName}" to timeline`, 'success')
     },
-    [timeline, handleTimelineUpdate, toast]
+    [timeline, handleTimelineUpdate, toast, calculateTotalDuration]
   )
 
   const handlePlayPause = useCallback(() => {
@@ -159,6 +181,7 @@ export const EditorWorkspace = ({ project }: EditorWorkspaceProps) => {
         <ToolsPanel />
         <PreviewWindow
           project={projectWithAssets}
+          timeline={timeline}
           currentTime={currentTime}
           isPlaying={isPlaying}
           onPlayPause={handlePlayPause}
@@ -178,6 +201,7 @@ export const EditorWorkspace = ({ project }: EditorWorkspaceProps) => {
         onTimelineUpdate={handleTimelineUpdate}
         currentTime={currentTime}
         onSeek={handleSeek}
+        onClipDelete={handleClipDelete}
       />
     </div>
   )
