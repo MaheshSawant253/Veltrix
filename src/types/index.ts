@@ -187,3 +187,49 @@ export interface NewVideoFormData {
   channelId?: string
   scriptIdea?: string
 }
+
+// ── Phase 4C: Export Pipeline ──
+
+export interface ExportSettings {
+  outputPath: string
+  resolution: '1920x1080' | '1280x720' | '3840x2160'
+  fps: 24 | 30 | 60
+  quality: 'high' | 'medium' | 'fast'
+  format: 'mp4'
+}
+
+export interface ExportJob {
+  id: string
+  projectId: string
+  projectTitle: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  progress: number        // 0-100
+  currentStep: string     // human readable status
+  outputPath: string
+  startedAt?: string
+  completedAt?: string
+  errorMessage?: string
+  encoderUsed: string
+}
+
+export interface ExportProgressEvent {
+  jobId: string
+  progress: number
+  currentStep: string
+  timeElapsed: number     // seconds
+  timeRemaining?: number  // estimated seconds
+}
+
+export interface ExportCommand {
+  inputs: InputFile[]
+  filterComplex: string
+  outputOptions: string[]
+  outputPath: string
+  totalDuration: number
+}
+
+export interface InputFile {
+  index: number
+  filePath: string
+  type: 'video' | 'audio' | 'image'
+}

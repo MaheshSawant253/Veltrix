@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { initDatabase, handleDbQuery, handleDbRun } from './handlers/db.handler'
 import { handleDetectEncoder, handleGetVersion } from './handlers/ffmpeg.handler'
@@ -7,6 +7,11 @@ import {
   handleGetMediaDuration,
   handleFileExists
 } from './handlers/file.handler'
+import { 
+  handleStartExport, 
+  handleCancelExport,
+  handleGetDefaultOutputPath 
+} from './handlers/export.handler'
 
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
@@ -60,6 +65,36 @@ const registerIpcHandlers = (): void => {
   // App handlers
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getPlatform', () => process.platform)
+
+  // Export handlers
+  ipcMain.handle('export:getDefaultPath', (_, title: string) =>
+    handleGetDefaultOutputPath(title)
+  )
+
+  ipcMain.handle('export:start', async (event, params) => {
+    return handleStartExport(params, (progressEvent) => {
+      // Send progress events back to renderer
+      event.sender.send('export:progress', progressEvent)
+    })
+  })
+
+  ipcMain.handle('export:cancel', (_, jobId: string) =>
+    handleCancelExport(jobId)
+  )
+
+  ipcMain.handle('export:openFolder', (_, folderPath: string) => {
+    const { shell } = require('electron')
+    shell.openPath(folderPath)
+  })
+
+  ipcMain.handle('dialog:showSaveDialog', async () => {
+    const result = await dialog.showSaveDialog({
+      title: 'Export Video',
+      defaultPath: 'output.mp4',
+      filters: [{ name: 'MP4 Video', extensions: ['mp4'] }]
+    })
+    return result.canceled ? null : result.filePath
+  })
 }
 
 app.whenReady().then(() => {

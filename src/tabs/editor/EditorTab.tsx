@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Plus, Film, ArrowLeft, Download } from 'lucide-react'
+import { Plus, Film, ArrowLeft } from 'lucide-react'
 import { useAppStore } from '../../store/app.store'
 import { useProject } from '../../hooks/useProject'
 import { useToast } from '../../hooks/useToast'
 import { DraftsList } from './DraftsList'
 import { NewVideoWizard } from './NewVideoWizard'
 import { EditorWorkspace } from './workspace/EditorWorkspace'
+import { ExportPanel } from './workspace/ExportPanel'
 import type { NewVideoFormData } from '../../types'
 
 export const EditorTab = () => {
@@ -22,8 +23,11 @@ export const EditorTab = () => {
     deleteProject
   } = useProject()
 
+  const { encoderInfo } = useAppStore()
+
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardInitial, setWizardInitial] = useState<Partial<NewVideoFormData> | null>(null)
+  const [showExportPanel, setShowExportPanel] = useState(false)
 
   // Auto-open wizard if pendingVideoIdea exists
   useEffect(() => {
@@ -70,17 +74,33 @@ export const EditorTab = () => {
           <span className="text-xs font-medium text-text-primary">
             {activeProject.title}
           </span>
-          <button
-            disabled
-            className="flex items-center gap-1 rounded-md bg-surface-2 px-3 py-1 text-xs text-text-secondary/50"
-            title="Export (coming soon)"
+          <button 
+            onClick={() => setShowExportPanel(true)}
+            style={{
+              background: '#6366f1',
+              color: 'white',
+              border: 'none',
+              padding: '6px 16px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 500,
+            }}
           >
-            <Download size={12} />
-            Export
+            ↓ Export
           </button>
         </div>
 
         <EditorWorkspace project={activeProject} />
+
+        {showExportPanel && activeProject.timeline && encoderInfo && (
+          <ExportPanel
+            project={activeProject}
+            timeline={activeProject.timeline}
+            encoderInfo={encoderInfo}
+            onClose={() => setShowExportPanel(false)}
+          />
+        )}
       </div>
     )
   }
