@@ -19,7 +19,8 @@ const createWindow = (): void => {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      webSecurity: false
+      webSecurity: false,
+      autoplayPolicy: 'no-user-gesture-required' // ensure media never gets blocked
     }
   })
 

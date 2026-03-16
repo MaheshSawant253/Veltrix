@@ -34,6 +34,7 @@ export const PreviewWindow = ({
   duration
 }: PreviewWindowProps) => {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -42,6 +43,8 @@ export const PreviewWindow = ({
   const currentTimeRef = useRef(currentTime)
   
   const activeClipRef = useRef<TimelineClip | null>(null)
+  const activeAudioClipRef = useRef<TimelineClip | null>(null)
+
   const isPlayingRef = useRef(isPlaying)
   const onSeekRef = useRef(onSeek)
   const onPlayPauseRef = useRef(onPlayPause)
@@ -63,6 +66,8 @@ export const PreviewWindow = ({
 
     const textTrack = timeline.tracks.find(t => t.type === 'text')
     if (!textTrack) return
+    // Respect mute for text tracks (hidden)
+    if (textTrack.isMuted) return
 
     const activeTextClips = textTrack.clips.filter(clip =>
       time >= clip.startTime && 
@@ -106,29 +111,76 @@ export const PreviewWindow = ({
   function getActiveClipAtTime(time: number): {
     clip: TimelineClip | null
     type: 'video' | 'image' | 'none'
+    isMuted: boolean
   } {
     const videoTrack = timeline.tracks.find(t => t.type === 'video')
-    if (!videoTrack) return { clip: null, type: 'none' }
+    if (!videoTrack) return { clip: null, type: 'none', isMuted: false }
     
     const clip = videoTrack.clips.find(c =>
       time >= c.startTime && time < c.startTime + c.duration
     ) ?? null
     
-    if (!clip) return { clip: null, type: 'none' }
+    if (!clip) return { clip: null, type: 'none', isMuted: videoTrack.isMuted }
     
     const imageExts = ['jpg','jpeg','png','webp','gif']
     const ext = clip.filePath?.split('.').pop()?.toLowerCase() ?? ''
     const isImage = imageExts.includes(ext) || clip.type === 'image'
     
-    return { clip, type: isImage ? 'image' : 'video' }
+    return { clip, type: isImage ? 'image' : 'video', isMuted: videoTrack.isMuted }
   }
 
-  // Effect 1: Clip loading and seeking
+  // Find active audio clip
+  function getActiveAudioClipAtTime(time: number): {
+    clip: TimelineClip | null
+    isMuted: boolean
+  } {
+    const audioTrack = timeline.tracks.find(t => t.type === 'audio')
+    if (!audioTrack) return { clip: null, isMuted: false }
+    const clip = audioTrack.clips.find(c =>
+      time >= c.startTime && time < c.startTime + c.duration
+    ) ?? null
+    return { clip, isMuted: audioTrack.isMuted }
+  }
+
+  // Effect 1A: Audio Track loading and seeking
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    const { clip, isMuted } = getActiveAudioClipAtTime(currentTime)
+    audio.muted = isMuted
+
+    if (clip?.filePath !== activeAudioClipRef.current?.filePath) {
+      activeAudioClipRef.current = clip
+      if (clip?.filePath) {
+        audio.src = toFileUrl(clip.filePath)
+        audio.load()
+        audio.onloadedmetadata = () => {
+          const localTime = currentTime - clip.startTime + clip.trimIn
+          audio.currentTime = Math.max(0, localTime)
+          if (isPlayingRef.current) {
+            audio.play().catch(console.error)
+          }
+        }
+      } else {
+        audio.src = ''
+        audio.pause()
+      }
+    } else if (clip && audio.readyState >= 2) {
+        const expectedTime = currentTime - clip.startTime + clip.trimIn
+        if (Math.abs(audio.currentTime - expectedTime) > 0.3) {
+            audio.currentTime = expectedTime
+        }
+    }
+  }, [currentTime, timeline.tracks])
+
+  // Effect 1B: Video Clip loading and seeking
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
-    const { clip, type } = getActiveClipAtTime(currentTime)
+    const { clip, type, isMuted } = getActiveClipAtTime(currentTime)
+    video.muted = isMuted
     
     // Check if clip changed
     if (clip?.filePath !== activeClipRef.current?.filePath) {
@@ -182,6 +234,7 @@ export const PreviewWindow = ({
   // Effect 2: Play/Pause toggling
   useEffect(() => {
     const video = videoRef.current
+    const audio = audioRef.current
     if (!video) return
     
     if (isPlaying) {
@@ -189,12 +242,16 @@ export const PreviewWindow = ({
       if (video.src && video.src !== window.location.href && activeMode === 'video') {
         video.play().catch(console.error)
       }
+      if (audio && audio.src && audio.src !== window.location.href) {
+        audio.play().catch(console.error)
+      }
     } else {
       video.pause()
+      if (audio) audio.pause()
     }
   }, [isPlaying, activeMode])
 
-  // Part C: Track currentTime from video
+  // Part C: Track currentTime from video OR explicitly using interval if NO video is present
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -234,15 +291,13 @@ export const PreviewWindow = ({
     }
   }, [duration, renderTextOverlays])
 
-  // Part D: Unmute volume
+  // Part D: Unmute volume master controls
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.volume = 1.0
-      videoRef.current.muted = false
-    }
+    if (videoRef.current) videoRef.current.volume = 1.0
+    if (audioRef.current) audioRef.current.volume = 1.0
   }, [])
 
-  // Fix 5: Continuous playback ticker for images & gaps
+  // Fix 5: Continuous playback ticker for images, gaps, & audio-only sections
   useEffect(() => {
     if (!isPlaying) return
 
@@ -251,6 +306,7 @@ export const PreviewWindow = ({
       const ext = clip?.filePath?.split('.').pop()?.toLowerCase() ?? '';
       const isImage = ['jpg','jpeg','png','webp','gif'].includes(ext) || clip?.type === 'image';
       
+      // We manually tick if there's no video clip active
       if (!clip || isImage) {
         const next = currentTimeRef.current + 0.25
         if (next >= duration && duration > 0) {
@@ -270,6 +326,9 @@ export const PreviewWindow = ({
       flexDirection: 'column', backgroundColor: '#0a0a0a',
       overflow: 'hidden' }}>
 
+      {/* Hidden audio element for the audio track */}
+      <audio ref={audioRef} style={{ display: 'none' }} />
+
       {/* Preview area */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex',
         alignItems: 'center', justifyContent: 'center',
@@ -283,10 +342,9 @@ export const PreviewWindow = ({
           backgroundColor: '#000',
           overflow: 'hidden'
         }}>
-          {/* Video element — used for video/audio playback */}
+          {/* Video element — used for video playback */}
           <video
             ref={videoRef}
-            muted={false}
             style={{
               width: '100%', 
               height: '100%',
