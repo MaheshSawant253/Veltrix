@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Volume2, VolumeX, Lock, Unlock, Minus, Plus } from 'lucide-react'
 import type { TimelineData, TimelineTrack as TrackType, TimelineClip } from '../../../types'
 import { TimelineRuler } from './TimelineRuler'
@@ -31,20 +31,36 @@ interface DragState {
   originalClip: TimelineClip
 }
 
+function calculateTotalDuration(tracks: TrackType[]): number {
+  let max = 0
+  tracks.forEach(track => {
+    track.clips.forEach(clip => {
+      const end = clip.startTime + clip.duration
+      if (end > max) max = end
+    })
+  })
+  return max
+}
+
 const ClipBlock = ({
   clip,
   track,
   pxPerSec,
   onDragStart,
-  onDelete
+  onDelete,
+  onUpdateClip
 }: {
   clip: TimelineClip
   track: TrackType
   pxPerSec: number
   onDragStart: (e: React.MouseEvent, type: DragState['type']) => void
   onDelete?: () => void
+  onUpdateClip: (clip: TimelineClip) => void
 }) => {
   const [isHovered, setIsHovered] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingText, setEditingText] = useState(clip.content || clip.name || '')
+  
   const colors = TRACK_COLORS[track.type] || TRACK_COLORS.video
   const width = Math.max(clip.duration * pxPerSec, 4)
   const left = clip.startTime * pxPerSec
@@ -65,9 +81,15 @@ const ClipBlock = ({
         e.stopPropagation()
         onDragStart(e, 'move')
       }}
+      onDoubleClick={() => {
+        if (clip.type === 'text') {
+          setIsEditing(true)
+          setEditingText(clip.content || clip.name || '')
+        }
+      }}
     >
       {/* Delete button */}
-      {isHovered && onDelete && (
+      {isHovered && onDelete && !isEditing && (
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -80,6 +102,38 @@ const ClipBlock = ({
         </button>
       )}
 
+      {/* Double click edit text */}
+      {isEditing && clip.type === 'text' && (
+        <input
+          autoFocus
+          value={editingText}
+          onChange={e => setEditingText(e.target.value)}
+          onBlur={() => {
+            const updatedClip = { ...clip, content: editingText, name: editingText }
+            onUpdateClip(updatedClip)
+            setIsEditing(false)
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+            if (e.key === 'Escape') setIsEditing(false)
+          }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(0,0,0,0.8)',
+            border: '2px solid #f59e0b',
+            borderRadius: 4,
+            color: '#fff',
+            fontSize: 12,
+            padding: '2px 8px',
+            width: '100%',
+            zIndex: 30,
+          }}
+          onClick={e => e.stopPropagation()}
+          onMouseDown={e => e.stopPropagation()}
+        />
+      )}
+
       {/* Left trim handle */}
       <div
         className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize"
@@ -90,7 +144,7 @@ const ClipBlock = ({
         }}
       />
       {/* Clip label */}
-      {width > 60 && (
+      {width > 60 && !isEditing && (
         <div className="truncate px-2 py-1 text-[10px] text-white/80">
           {clip.name}
         </div>
@@ -120,6 +174,28 @@ export const TimelinePanel = ({
   const dragRef = useRef<DragState | null>(null)
   const pxPerSec = 80 * zoom
 
+  const tracksScrollRef = useRef<HTMLDivElement>(null)
+  const rulerScrollRef = useRef<HTMLDivElement>(null)
+
+  // Sync scroll between ruler and tracks
+  const handleTracksScroll = () => {
+    if (rulerScrollRef.current && tracksScrollRef.current) {
+      rulerScrollRef.current.scrollLeft = tracksScrollRef.current.scrollLeft
+    }
+  }
+
+  // Auto-scroll during playback
+  useEffect(() => {
+    const container = tracksScrollRef.current
+    if (!container) return
+    const pos = currentTime * pxPerSec
+    if (pos > container.scrollLeft + container.clientWidth - 200) {
+      container.scrollLeft = Math.max(0, pos - 200)
+    } else if (pos < container.scrollLeft) {
+      container.scrollLeft = Math.max(0, pos - 50)
+    }
+  }, [currentTime, pxPerSec])
+
   const toggleMute = (trackId: string) => {
     const updated = {
       ...timeline,
@@ -140,10 +216,28 @@ export const TimelinePanel = ({
     onTimelineUpdate(updated)
   }
 
+  const saveClipUpdate = useCallback((trackId: string, updatedClip: TimelineClip) => {
+    const updatedTracks = timeline.tracks.map(t => {
+      if (t.id === trackId) {
+        return {
+          ...t,
+          clips: t.clips.map(c => c.id === updatedClip.id ? updatedClip : c)
+        }
+      }
+      return t
+    })
+    const updatedTimeline: TimelineData = {
+      ...timeline,
+      tracks: updatedTracks,
+      totalDuration: calculateTotalDuration(updatedTracks)
+    }
+    onTimelineUpdate(updatedTimeline)
+  }, [timeline, onTimelineUpdate])
+
   const handleRulerClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const rect = e.currentTarget.getBoundingClientRect()
-      const x = e.clientX - rect.left
+      const x = e.clientX - rect.left + (rulerScrollRef.current?.scrollLeft || 0)
       const time = Math.max(0, x / pxPerSec)
       onSeek(time)
     },
@@ -193,14 +287,8 @@ export const TimelinePanel = ({
         updatedTimeline.tracks = [...updatedTimeline.tracks]
         updatedTimeline.tracks[trackIdx] = track
 
-        // Recalculate total duration
-        let maxEnd = 0
-        for (const t of updatedTimeline.tracks) {
-          for (const c of t.clips) {
-            maxEnd = Math.max(maxEnd, c.startTime + c.duration)
-          }
-        }
-        updatedTimeline.totalDuration = maxEnd
+        // Fix 1: totalDuration on stretch must ALWAYS be recalculated
+        updatedTimeline.totalDuration = calculateTotalDuration(updatedTimeline.tracks)
 
         onTimelineUpdate(updatedTimeline)
       }
@@ -218,26 +306,39 @@ export const TimelinePanel = ({
   )
 
   const playheadLeft = currentTime * pxPerSec
+  
+  // Calculate width correctly allowing clips to stretch and container to scroll
+  const timelineContentWidth = Math.max(
+    1200,
+    (timeline.totalDuration + 30) * pxPerSec
+  )
+  const rulerDurationRaw = Math.max(timeline.totalDuration + 30, 1200 / pxPerSec)
 
   return (
     <div className="flex h-60 shrink-0 flex-col border-t border-border bg-[#111]">
       {/* Ruler row */}
-      <div className="flex">
-        <div className="w-[120px] shrink-0 border-b border-r border-[#1e1e1e] bg-[#0f0f0f]" />
-        <div className="relative flex-1 cursor-crosshair overflow-hidden" onClick={handleRulerClick}>
-          <TimelineRuler duration={timeline.totalDuration} zoom={zoom} />
-          {/* Playhead on ruler */}
-          <div
-            className="absolute top-0 h-full w-0.5 bg-[#ef4444]"
-            style={{ left: playheadLeft, zIndex: 10 }}
-          />
+      <div className="flex relative">
+        <div className="w-[120px] shrink-0 border-b border-r border-[#1e1e1e] bg-[#0f0f0f] z-20" />
+        <div 
+          ref={rulerScrollRef}
+          className="relative flex-1 cursor-crosshair overflow-hidden" 
+          onClick={handleRulerClick}
+        >
+          <div style={{ width: timelineContentWidth, height: '32px', position: 'relative' }}>
+            <TimelineRuler duration={rulerDurationRaw} zoom={zoom} />
+            {/* Playhead on ruler */}
+            <div
+              className="absolute top-0 h-full w-0.5 bg-[#ef4444]"
+              style={{ left: playheadLeft, zIndex: 10 }}
+            />
+          </div>
         </div>
       </div>
 
       {/* Tracks area */}
       <div className="flex min-h-0 flex-1 overflow-y-auto">
         {/* Track labels column */}
-        <div className="w-[120px] shrink-0 border-r border-[#1e1e1e] bg-[#0f0f0f]">
+        <div className="w-[120px] shrink-0 border-r border-[#1e1e1e] bg-[#0f0f0f] z-20">
           {timeline.tracks.map((track) => (
             <div
               key={track.id}
@@ -276,54 +377,61 @@ export const TimelinePanel = ({
         </div>
 
         {/* Track lanes */}
-        <div className="relative flex-1 overflow-x-auto">
-          {/* Playhead line across tracks */}
-          <div
-            className="absolute top-0 h-full w-0.5 bg-[#ef4444] pointer-events-none"
-            style={{ left: playheadLeft, zIndex: 10 }}
-          />
-          {timeline.tracks.map((track) => (
+        <div 
+          ref={tracksScrollRef}
+          className="relative flex-1 overflow-x-auto"
+          onScroll={handleTracksScroll}
+        >
+          <div style={{ minWidth: timelineContentWidth, height: '100%', position: 'relative' }}>
+            {/* Playhead line across tracks */}
             <div
-              key={track.id}
-              onClick={() => setSelectedTrackId(track.id)}
-              className={`relative cursor-pointer border-b transition-colors ${
-                selectedTrackId === track.id ? 'bg-[#161616]' : 'bg-[#111]'
-              }`}
-              style={{ height: track.height, borderColor: '#1e1e1e' }}
-            >
-              {/* Color strip */}
+              className="absolute top-0 h-full w-0.5 bg-[#ef4444] pointer-events-none"
+              style={{ left: playheadLeft, zIndex: 10 }}
+            />
+            {timeline.tracks.map((track) => (
               <div
-                className="absolute left-0 top-0 h-full w-[3px]"
-                style={{ backgroundColor: STRIP_COLORS[track.type] || '#6366f1' }}
-              />
-
-              {/* Clips */}
-              {track.clips.map((clip) => (
-                <ClipBlock
-                  key={clip.id}
-                  clip={clip}
-                  track={track}
-                  pxPerSec={pxPerSec}
-                  onDragStart={(e, type) => startClipDrag(e, type, track.id, clip)}
-                  onDelete={onClipDelete ? () => onClipDelete(track.id, clip.id) : undefined}
+                key={track.id}
+                onClick={() => setSelectedTrackId(track.id)}
+                className={`relative cursor-pointer border-b transition-colors ${
+                  selectedTrackId === track.id ? 'bg-[#161616]' : 'bg-[#111]'
+                }`}
+                style={{ height: track.height, borderColor: '#1e1e1e', boxSizing: 'border-box' }}
+              >
+                {/* Color strip */}
+                <div
+                  className="absolute left-0 top-0 h-full w-[3px]"
+                  style={{ backgroundColor: STRIP_COLORS[track.type] || '#6366f1' }}
                 />
-              ))}
 
-              {/* Empty state */}
-              {track.clips.length === 0 && (
-                <div className="flex h-full items-center justify-center">
-                  <div className="rounded border border-dashed border-[#2a2a2a] px-4 py-1">
-                    <span className="text-[10px] text-[#3a3a3a]">Drop media here</span>
+                {/* Clips */}
+                {track.clips.map((clip) => (
+                  <ClipBlock
+                    key={clip.id}
+                    clip={clip}
+                    track={track}
+                    pxPerSec={pxPerSec}
+                    onDragStart={(e, type) => startClipDrag(e, type, track.id, clip)}
+                    onDelete={onClipDelete ? () => onClipDelete(track.id, clip.id) : undefined}
+                    onUpdateClip={(updated) => saveClipUpdate(track.id, updated)}
+                  />
+                ))}
+
+                {/* Empty state */}
+                {track.clips.length === 0 && (
+                  <div className="flex h-full items-center justify-center min-w-[200px]" style={{position: 'absolute', left: 0, width: '100%'}}>
+                    <div className="rounded border border-dashed border-[#2a2a2a] px-4 py-1">
+                      <span className="text-[10px] text-[#3a3a3a]">Drop media here</span>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Zoom controls */}
-      <div className="flex h-7 items-center justify-end gap-2 border-t border-[#1e1e1e] bg-[#0f0f0f] px-3">
+      <div className="flex h-7 items-center justify-end gap-2 border-t border-[#1e1e1e] bg-[#0f0f0f] px-3 z-20 shrink-0">
         <button
           onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}
           className="text-text-secondary/50 hover:text-text-secondary"

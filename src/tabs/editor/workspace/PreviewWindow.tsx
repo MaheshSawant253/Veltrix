@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import type { VideoProject, TimelineData, TimelineClip } from '../../../types'
 
 interface PreviewWindowProps {
@@ -34,137 +34,195 @@ export const PreviewWindow = ({
   duration
 }: PreviewWindowProps) => {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [activeMode, setActiveMode] = useState<'video' | 'canvas'>('canvas')
+  const textCanvasRef = useRef<HTMLCanvasElement>(null)
+
+  const [activeMode, setActiveMode] = useState<'video' | 'image' | 'canvas'>('canvas')
   const currentTimeRef = useRef(currentTime)
   
-  // Find which video/audio clip is active at a given time
-  function getActiveVideoClip(time: number): TimelineClip | null {
-    const videoTrack = timeline.tracks.find(t => t.type === 'video')
-    if (!videoTrack) return null
-    return videoTrack.clips.find(clip =>
+  const activeClipRef = useRef<TimelineClip | null>(null)
+  const isPlayingRef = useRef(isPlaying)
+  const onSeekRef = useRef(onSeek)
+  const onPlayPauseRef = useRef(onPlayPause)
+
+  // Update refs
+  useEffect(() => { currentTimeRef.current = currentTime }, [currentTime])
+  useEffect(() => { isPlayingRef.current = isPlaying }, [isPlaying])
+  useEffect(() => { onSeekRef.current = onSeek }, [onSeek])
+  useEffect(() => { onPlayPauseRef.current = onPlayPause }, [onPlayPause])
+
+  // Fix 3: Render Text over everything
+  const renderTextOverlays = useCallback((time: number) => {
+    const canvas = textCanvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.clearRect(0, 0, 1920, 1080)
+
+    const textTrack = timeline.tracks.find(t => t.type === 'text')
+    if (!textTrack) return
+
+    const activeTextClips = textTrack.clips.filter(clip =>
       time >= clip.startTime && 
       time < clip.startTime + clip.duration
-    ) ?? null
-  }
+    )
+
+    activeTextClips.forEach(clip => {
+      const text = clip.content || clip.name || 'Text'
+      
+      const isTitle = clip.name?.toLowerCase().includes('title')
+      const fontSize = isTitle ? 80 : 48
+      const yPos = isTitle ? 200 : 900
+
+      ctx.font = `bold ${fontSize}px Arial, sans-serif`
+      ctx.textAlign = 'center'
+      
+      ctx.shadowColor = 'rgba(0,0,0,0.8)'
+      ctx.shadowBlur = 8
+      ctx.shadowOffsetX = 2
+      ctx.shadowOffsetY = 2
+      
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(text, 960, yPos, 1800)
+      
+      ctx.shadowColor = 'transparent'
+      ctx.shadowBlur = 0
+    })
+  }, [timeline.tracks])
+
+  // Ensure text rendering stays up to date when jumping
+  useEffect(() => {
+    renderTextOverlays(currentTime)
+  }, [currentTime, renderTextOverlays])
 
   // Convert Windows path to file:// URL
   function toFileUrl(filePath: string): string {
     return 'file:///' + filePath.replace(/\\/g, '/').replace(/ /g, '%20')
   }
 
-  // Draw image contained instead of stretching
-  function drawImageContained(
-    ctx: CanvasRenderingContext2D,
-    img: HTMLImageElement | HTMLVideoElement,
-    canvasW: number,
-    canvasH: number
-  ): void {
-    const imgW = img instanceof HTMLImageElement 
-      ? img.naturalWidth : (img as HTMLVideoElement).videoWidth
-    const imgH = img instanceof HTMLImageElement 
-      ? img.naturalHeight : (img as HTMLVideoElement).videoHeight
-
-    if (!imgW || !imgH) return
-
-    const scale = Math.min(canvasW / imgW, canvasH / imgH)
-    const drawW = imgW * scale
-    const drawH = imgH * scale
-    const offsetX = (canvasW - drawW) / 2
-    const offsetY = (canvasH - drawH) / 2
-
-    // Fill background black first
-    ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, canvasW, canvasH)
-
-    ctx.drawImage(img, offsetX, offsetY, drawW, drawH)
+  // Find active media clip
+  function getActiveClipAtTime(time: number): {
+    clip: TimelineClip | null
+    type: 'video' | 'image' | 'none'
+  } {
+    const videoTrack = timeline.tracks.find(t => t.type === 'video')
+    if (!videoTrack) return { clip: null, type: 'none' }
+    
+    const clip = videoTrack.clips.find(c =>
+      time >= c.startTime && time < c.startTime + c.duration
+    ) ?? null
+    
+    if (!clip) return { clip: null, type: 'none' }
+    
+    const imageExts = ['jpg','jpeg','png','webp','gif']
+    const ext = clip.filePath?.split('.').pop()?.toLowerCase() ?? ''
+    const isImage = imageExts.includes(ext) || clip.type === 'image'
+    
+    return { clip, type: isImage ? 'image' : 'video' }
   }
 
-  // When play state or currentTime changes
+  // Effect 1: Clip loading and seeking
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
-    const activeClip = getActiveVideoClip(currentTime)
-
-    if (activeClip?.filePath) {
-      // Check if it's an image
-      const ext = activeClip.filePath.split('.').pop()?.toLowerCase() || ''
-      if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+    const { clip, type } = getActiveClipAtTime(currentTime)
+    
+    // Check if clip changed
+    if (clip?.filePath !== activeClipRef.current?.filePath) {
+      activeClipRef.current = clip
+      
+      if (type === 'image' && clip?.filePath) {
+        const img = imgRef.current
+        if (img) {
+          img.src = toFileUrl(clip.filePath)
+        }
+        setActiveMode('image')
+        video.src = ''
+        video.pause()
+      } else if (type === 'video' && clip?.filePath) {
+        video.src = toFileUrl(clip.filePath)
+        video.load()
+        // Wait for metadata to be available before seeking
+        video.onloadedmetadata = () => {
+          const localTime = currentTime - clip.startTime + clip.trimIn
+          video.currentTime = Math.max(0, localTime)
+          if (isPlayingRef.current) {
+            video.play().catch(console.error)
+          }
+        }
+        setActiveMode('video')
+      } else {
+        // No clip active
+        video.src = ''
+        video.pause()
         setActiveMode('canvas')
-        video.pause() // assure it's paused
-        
         const canvas = canvasRef.current
         if (canvas) {
           const ctx = canvas.getContext('2d')
           if (ctx) {
-            const img = new Image()
-            img.onload = () => {
-              drawImageContained(ctx, img, canvas.width, canvas.height)
-            }
-            img.src = toFileUrl(activeClip.filePath)
+            ctx.fillStyle = '#000'
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
           }
         }
-      } else {
-        const fileUrl = toFileUrl(activeClip.filePath)
-        
-        // Only change src if different clip
-        if (video.src !== fileUrl) {
-          video.src = fileUrl
-          video.load()
+      }
+    } else if (clip && type === 'video' && video.readyState >= 2) {
+        // Clip is same, but we might have done a manual seek while paused
+        // Since event loop splits these, if currentTime is too far from video time, seek it
+        const expectedTime = currentTime - clip.startTime + clip.trimIn
+        // If diff > 0.3s (to avoid jitter during playback)
+        if (Math.abs(video.currentTime - expectedTime) > 0.3) {
+            video.currentTime = expectedTime
         }
+    }
+  }, [currentTime, timeline.tracks])
 
-        // Seek to correct position within clip
-        const clipLocalTime = 
-          currentTime - activeClip.startTime + activeClip.trimIn
-        
-        if (Math.abs(video.currentTime - clipLocalTime) > 0.3) {
-          video.currentTime = clipLocalTime
-        }
-
-        setActiveMode('video')
-
-        if (isPlaying) {
-          video.play().catch(err => {
-            console.error('Playback error:', err)
-          })
-        } else {
-          video.pause()
-        }
+  // Effect 2: Play/Pause toggling
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    
+    if (isPlaying) {
+      // Only play if it's a valid source, to prevent failed play attempts
+      if (video.src && video.src !== window.location.href && activeMode === 'video') {
+        video.play().catch(console.error)
       }
     } else {
-      // No video clip — show black canvas
       video.pause()
-      setActiveMode('canvas')
-      const canvas = canvasRef.current
-      if (canvas) {
-        const ctx = canvas.getContext('2d')
-        if (ctx) {
-          ctx.fillStyle = '#000'
-          ctx.fillRect(0, 0, canvas.width, canvas.height)
-        }
-      }
     }
-  }, [isPlaying, currentTime, timeline.tracks])
+  }, [isPlaying, activeMode])
 
-  // Track video time → update parent currentTime
+  // Part C: Track currentTime from video
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
     const handleTimeUpdate = () => {
-      const activeClip = getActiveVideoClip(currentTimeRef.current)
-      if (!activeClip) return
-      const timelineTime = 
-        video.currentTime - activeClip.trimIn + activeClip.startTime
-      onSeek(timelineTime)
-      currentTimeRef.current = timelineTime
+      const clip = activeClipRef.current
+      if (!clip) return
+      // Only update parent if we are playing to avoid seek loops
+      if (isPlayingRef.current) {
+          const timelineTime = video.currentTime - clip.trimIn + clip.startTime
+          onSeekRef.current(timelineTime)
+          renderTextOverlays(timelineTime)
+      }
     }
 
     const handleEnded = () => {
-      // Only pause if this is the very end of the duration
-      if (currentTimeRef.current >= duration - 0.5) {
-        onPlayPause()
+      const clip = activeClipRef.current
+      if (!clip) return
+      
+      const nextTime = clip.startTime + clip.duration
+      // Is there more content?
+      const hasMoreContent = nextTime < duration
+      
+      if (hasMoreContent) {
+        onSeekRef.current(nextTime)
+      } else {
+        onSeekRef.current(0)
+        onPlayPauseRef.current()
       }
     }
 
@@ -174,12 +232,38 @@ export const PreviewWindow = ({
       video.removeEventListener('timeupdate', handleTimeUpdate)
       video.removeEventListener('ended', handleEnded)
     }
-  }, [duration, onSeek, onPlayPause, timeline.tracks])
+  }, [duration, renderTextOverlays])
 
-  // Keep a ref of current time for the timeupdate callback
+  // Part D: Unmute volume
   useEffect(() => {
-    currentTimeRef.current = currentTime
-  }, [currentTime])
+    if (videoRef.current) {
+      videoRef.current.volume = 1.0
+      videoRef.current.muted = false
+    }
+  }, [])
+
+  // Fix 5: Continuous playback ticker for images & gaps
+  useEffect(() => {
+    if (!isPlaying) return
+
+    const interval = setInterval(() => {
+      const clip = activeClipRef.current;
+      const ext = clip?.filePath?.split('.').pop()?.toLowerCase() ?? '';
+      const isImage = ['jpg','jpeg','png','webp','gif'].includes(ext) || clip?.type === 'image';
+      
+      if (!clip || isImage) {
+        const next = currentTimeRef.current + 0.25
+        if (next >= duration && duration > 0) {
+            onSeekRef.current(0)
+            onPlayPauseRef.current()
+        } else {
+            onSeekRef.current(next)
+        }
+      }
+    }, 250)
+
+    return () => clearInterval(interval)
+  }, [isPlaying, duration])
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', 
@@ -202,16 +286,30 @@ export const PreviewWindow = ({
           {/* Video element — used for video/audio playback */}
           <video
             ref={videoRef}
+            muted={false}
             style={{
               width: '100%', 
               height: '100%',
-              objectFit: 'contain',   // ← letterbox, no stretch
+              objectFit: 'contain',
               display: activeMode === 'video' ? 'block' : 'none',
               backgroundColor: '#000',
             }}
           />
 
-          {/* Canvas — used for images and empty state */}
+          {/* Image element (underneath, for images) */}
+          <img 
+            ref={imgRef}
+            alt="preview"
+            style={{
+              width: '100%', 
+              height: '100%',
+              objectFit: 'contain',
+              display: activeMode === 'image' ? 'block' : 'none',
+              backgroundColor: '#000'
+            }} 
+          />
+
+          {/* Canvas — used for empty state */}
           <canvas
             ref={canvasRef}
             width={1920}
@@ -224,10 +322,24 @@ export const PreviewWindow = ({
             }}
           />
 
+          {/* Text overlay canvas — ALWAYS on top */}
+          <canvas
+            ref={textCanvasRef}
+            width={1920}
+            height={1080}
+            style={{
+              position: 'absolute',
+              top: 0, left: 0,
+              width: '100%', height: '100%',
+              pointerEvents: 'none',
+              zIndex: 5,
+            }}
+          />
+
           {/* Resolution badge */}
           <div style={{ position: 'absolute', top: 8, right: 8,
             background: 'rgba(0,0,0,0.6)', color: '#fff',
-            fontSize: 11, padding: '2px 8px', borderRadius: 4 }}>
+            fontSize: 11, padding: '2px 8px', borderRadius: 4, zIndex: 10 }}>
             {resolutionLabel[project.settings.resolution] || '1080p'}
           </div>
         </div>
