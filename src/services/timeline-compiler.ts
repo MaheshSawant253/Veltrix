@@ -34,71 +34,54 @@ export function compileTimeline(
     .sort((a, b) => a.startTime - b.startTime) ?? []
 
   const imageExts = ['jpg','jpeg','png','webp','gif']
-
-  const videoSegments: string[] = []
   
+  const [w, h] = settings.resolution.split('x').map(Number)
+  
+  // 1) Initialize base canvas
+  filterParts.push(
+    `color=black:s=${w}x${h}:r=${settings.fps}:d=${timeline.totalDuration.toFixed(3)},format=yuv420p[base0]`
+  )
+  
+  let currentBase = 0
+
   videoClips.forEach((clip, i) => {
     const ext = clip.filePath!.split('.').pop()?.toLowerCase() ?? ''
     const isImage = imageExts.includes(ext)
-    const idx = getOrAddInput(
-      clip.filePath!,
-      isImage ? 'image' : 'video'
-    )
+    const idx = getOrAddInput(clip.filePath!, isImage ? 'image' : 'video')
 
     if (isImage) {
-      // Image: loop for duration, scale to resolution
-      const [w, h] = settings.resolution.split('x').map(Number)
-      // Images added with -loop 1 -t duration flags
-      // Mark as image input for special handling
       inputs[inputs.findIndex(inp => inp.index === idx)].type = 'image'
-      
-      // Scale and pad to target resolution (letterbox)
       filterParts.push(
         `[${idx}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
         `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black,` +
-        `setsar=1,fps=${settings.fps},` +
-        `trim=duration=${clip.duration},` +
-        `setpts=PTS-STARTPTS[v${i}]`
+        `setsar=1,fps=${settings.fps},format=yuv420p,` +
+        `trim=duration=${clip.duration.toFixed(3)},` +
+        `setpts=PTS-STARTPTS+${clip.startTime.toFixed(3)}/TB[v${i}]`
       )
     } else {
-      // Video: trim and normalize
-      const [w, h] = settings.resolution.split('x').map(Number)
       const trimStart = clip.trimIn
       const trimEnd = clip.trimIn + clip.duration
-      
       filterParts.push(
         `[${idx}:v]trim=start=${trimStart.toFixed(3)}:` +
         `end=${trimEnd.toFixed(3)},` +
-        `setpts=PTS-STARTPTS,` +
+        `setpts=PTS-STARTPTS+${clip.startTime.toFixed(3)}/TB,` +
         `scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
         `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black,` +
-        `setsar=1,fps=${settings.fps}[v${i}]`
+        `setsar=1,fps=${settings.fps},format=yuv420p[v${i}]`
       )
     }
-    videoSegments.push(`[v${i}]`)
+    
+    // Overlay the clip onto the base canvas at its correct absolute time
+    const startT = clip.startTime.toFixed(3)
+    const endT = (clip.startTime + clip.duration).toFixed(3)
+    filterParts.push(
+      `[base${currentBase}][v${i}]overlay=eof_action=pass:` +
+      `enable='between(t,${startT},${endT})'[base${currentBase + 1}]`
+    )
+    currentBase++
   })
 
-  // Concatenate all video segments
-  let videoOutput = '[vout]'
-  if (videoSegments.length === 0) {
-    // No video — generate black background
-    const [w, h] = settings.resolution.split('x').map(Number)
-    filterParts.push(
-      `color=black:s=${w}x${h}:r=${settings.fps}:` +
-      `d=${timeline.totalDuration}[vout]`
-    )
-  } else if (videoSegments.length === 1) {
-    // Single clip — rename output
-    filterParts.push(
-      `${videoSegments[0]}copy[vout]`
-    )
-  } else {
-    // Multiple clips — concat
-    filterParts.push(
-      `${videoSegments.join('')}concat=n=${videoSegments.length}` +
-      `:v=1:a=0[vout]`
-    )
-  }
+  let videoOutput = `[base${currentBase}]`
 
   // ── Process text clips (drawtext filter) ────────────────────
 
@@ -106,12 +89,12 @@ export function compileTimeline(
   const textClips = textTrack?.clips
     .sort((a, b) => a.startTime - b.startTime) ?? []
 
-  let currentVideoLabel = 'vout'
+  let currentVideoLabel = `base${currentBase}`
   
   textClips.forEach((clip, i) => {
     const text = (clip.content || clip.name || 'Text')
       .replace(/'/g, "\\'")   // escape single quotes for FFmpeg
-      .replace(/:/g, '\\:')  // escape colons
+      .replace(/:/g, '\\\\:')  // escape colons completely for drawtext
     
     const isTitle = clip.name?.toLowerCase().includes('title')
     const fontSize = isTitle ? 72 : 42
@@ -138,7 +121,7 @@ export function compileTimeline(
   // Final video label after text processing
   const finalVideoLabel = textClips.length > 0 
     ? `vtxt${textClips.length - 1}` 
-    : 'vout'
+    : `base${currentBase}`
 
   // ── Process audio tracks ─────────────────────────────────────
 
@@ -160,11 +143,13 @@ export function compileTimeline(
     const idx = fileInputMap.get(clip.filePath!)!
     const trimStart = clip.trimIn
     const trimEnd = clip.trimIn + clip.duration
+    const delayMs = Math.round(clip.startTime * 1000)
 
     filterParts.push(
       `[${idx}:a]atrim=start=${trimStart.toFixed(3)}:` +
       `end=${trimEnd.toFixed(3)},` +
-      `asetpts=PTS-STARTPTS[va${i}]`
+      `asetpts=PTS-STARTPTS,` +
+      `adelay=${delayMs}|${delayMs}[va${i}]`
     )
     audioSegments.push(`[va${i}]`)
   })
@@ -174,11 +159,13 @@ export function compileTimeline(
     const idx = getOrAddInput(clip.filePath!, 'audio')
     const trimStart = clip.trimIn
     const trimEnd = clip.trimIn + clip.duration
+    const delayMs = Math.round(clip.startTime * 1000)
 
     filterParts.push(
       `[${idx}:a]atrim=start=${trimStart.toFixed(3)}:` +
       `end=${trimEnd.toFixed(3)},` +
-      `asetpts=PTS-STARTPTS[aa${i}]`
+      `asetpts=PTS-STARTPTS,` +
+      `adelay=${delayMs}|${delayMs}[aa${i}]`
     )
     audioSegments.push(`[aa${i}]`)
   })
@@ -187,7 +174,7 @@ export function compileTimeline(
   if (audioSegments.length === 0) {
     // No audio — generate silence
     filterParts.push(
-      `aevalsrc=0:d=${timeline.totalDuration}[aout]`
+      `aevalsrc=0:d=${timeline.totalDuration.toFixed(3)}[aout]`
     )
   } else if (audioSegments.length === 1) {
     filterParts.push(`${audioSegments[0]}acopy[aout]`)
@@ -213,6 +200,7 @@ export function compileTimeline(
     '-map', `[${finalVideoLabel}]`,
     '-map', '[aout]',
     '-c:v', 'libx264',   // encoder resolved at runtime in main process
+    '-pix_fmt', 'yuv420p', // ensure universal compatibility and hardware encoder safety
     '-crf', q.crf,
     '-preset', q.preset,
     '-c:a', 'aac',

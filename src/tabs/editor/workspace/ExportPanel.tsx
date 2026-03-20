@@ -58,27 +58,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ project, timeline, enc
     })
 
     try {
-      const { jobId } = await exportService.startExport(project, timeline, settings, encoderInfo)
-      // wait artificially for it to complete? Actually exportService.startExport resolves immediately because IPC is invoked... Wait! 
-      // The user code for startExport has: return { jobId } synchronously?
-      // No, handleStartExport in main process returns a Promise that resolves when the export succeeds or fails!
-      // Let's check `exportService.startExport`. It calls `window.veltrix.export.start` which returns a Promise! 
-      // Wait, in `export.service.ts`:
-      // `window.veltrix.export.start({ ... })` returns Promise<{ success: boolean; outputPath?: string; error?: string }>
-      // BUT `startExport` in `export.service.ts` doesn't await that result before returning `{ jobId }`.
-      // Let's check my `export.service.ts` code:
-      // window.veltrix.export.start(...) <--- not awaited and not returned!
-      // I should await it in ExportPanel? No, I can't await it because export.service.startExport doesn't return that Promise. 
-      // Wait! In `export.service.ts`:
-      // async startExport(...) { ... window.veltrix.export.start(...); return { jobId } } 
-      // If I don't await window.veltrix.export.start inside startExport, I won't know when it succeeds or fails from the UI!
-      // I must await `window.veltrix.export.start` directly or change `export.service.ts`!
-      
-      const result = await window.veltrix.export.start({
-         jobId,
-         command: (await import('../../../services/timeline-compiler')).compileTimeline(timeline, settings),
-         encoderInfo
-      })
+      const result = await exportService.startExport(project, timeline, settings, encoderInfo)
 
       if (result.success) {
         setJob({ status: 'completed', progress: 100, currentStep: 'Done!' })

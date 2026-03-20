@@ -97,7 +97,7 @@ export const PreviewWindow = ({
   }, [currentTime, renderTextOverlays])
 
   function toFileUrl(filePath: string): string {
-    return 'file:///' + filePath.replace(/\\/g, '/').replace(/ /g, '%20')
+    return 'file:///' + filePath.replace(/\\/g, '/')
   }
 
   function getActiveClipAtTime(time: number): {
@@ -188,15 +188,20 @@ export const PreviewWindow = ({
     const { clip, isMuted } = getActiveAudioClipAtTime(currentTime)
     audio.muted = isMuted
 
-    if (clip?.filePath !== activeAudioClipRef.current?.filePath) {
+    if (clip?.id !== activeAudioClipRef.current?.id || clip?.filePath !== activeAudioClipRef.current?.filePath) {
       activeAudioClipRef.current = clip
       if (clip?.filePath) {
         audio.src = toFileUrl(clip.filePath)
         audio.load()
-        audio.onloadedmetadata = () => {
-          const expectedTime = currentTimeRef.current - clip.startTime + clip.trimIn
+        const playExpectedTime = () => {
+          const expectedTime = currentTimeRef.current - (clip.startTime || 0) + (clip.trimIn || 0)
           audio.currentTime = Math.max(0, expectedTime)
           if (isPlayingRef.current) audio.play().catch(console.error)
+        }
+        if (audio.readyState >= 2) {
+          playExpectedTime()
+        } else {
+          audio.onloadedmetadata = playExpectedTime
         }
       } else {
         audio.src = ''
@@ -219,7 +224,7 @@ export const PreviewWindow = ({
     const { clip, type, isMuted } = getActiveClipAtTime(currentTime)
     video.muted = isMuted
     
-    if (clip?.filePath !== activeClipRef.current?.filePath) {
+    if (clip?.id !== activeClipRef.current?.id || clip?.filePath !== activeClipRef.current?.filePath) {
       activeClipRef.current = clip
       
       if (type === 'image' && clip?.filePath) {
@@ -231,10 +236,15 @@ export const PreviewWindow = ({
       } else if (type === 'video' && clip?.filePath) {
         video.src = toFileUrl(clip.filePath)
         video.load()
-        video.onloadedmetadata = () => {
-          const expectedTime = currentTimeRef.current - clip.startTime + clip.trimIn
+        const playExpectedTime = () => {
+          const expectedTime = currentTimeRef.current - (clip.startTime || 0) + (clip.trimIn || 0)
           video.currentTime = Math.max(0, expectedTime)
           if (isPlayingRef.current) video.play().catch(console.error)
+        }
+        if (video.readyState >= 2) {
+          playExpectedTime()
+        } else {
+          video.onloadedmetadata = playExpectedTime
         }
         setActiveMode('video')
       } else {

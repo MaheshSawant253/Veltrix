@@ -73,6 +73,12 @@ export async function handleStartExport(
     '-progress pipe:1',  // send progress to stdout
   ].filter(Boolean).join(' ')
 
+  require('fs').writeFileSync(
+    require('path').join(__dirname, '../../LAST_FFMPEG_CMD.txt'),
+    fullCmd,
+    'utf-8'
+  )
+
   return new Promise((resolve) => {
     const startTime = Date.now()
     activeJobId = jobId
@@ -85,12 +91,13 @@ export async function handleStartExport(
         activeJobId = null
 
         if (error) {
+          console.error("FFMPEG EXPORT ERROR:\n", error.message)
           if (error.killed) {
             resolve({ success: false, error: 'Export cancelled' })
           } else {
             resolve({ 
               success: false, 
-              error: error.message.slice(0, 500) 
+              error: error.message 
             })
           }
         } else {

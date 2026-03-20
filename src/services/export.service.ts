@@ -11,12 +11,12 @@ export const exportService = {
     timeline: TimelineData,
     settings: ExportSettings,
     encoderInfo: EncoderInfo
-  ): Promise<{ jobId: string }> {
+  ): Promise<{ success: boolean; outputPath?: string; error?: string; jobId?: string }> {
     const jobId = uuidv4()
     const command = compileTimeline(timeline, settings)
     
-    // Fire and forget — progress comes via IPC events
-    window.veltrix.export.start({
+    // Send progress via IPC, but await the final encoding result!
+    const result = await window.veltrix.export.start({
       jobId,
       command,
       encoderInfo: {
@@ -25,7 +25,7 @@ export const exportService = {
       }
     })
 
-    return { jobId }
+    return { ...result, jobId }
   },
 
   cancelExport(jobId: string): Promise<boolean> {
